@@ -13,6 +13,7 @@ import { authRouter } from './routes/auth.js';
 import { healthRouter } from './routes/health.js';
 import { projectRouter } from './routes/projects.js';
 import { songRouter } from './routes/songs.js';
+import { debugRouter } from './routes/debug.js';
 
 export function createApp() {
   const app = express();
@@ -73,6 +74,11 @@ export function createApp() {
   app.use('/api/projects', projectRouter);
   app.use('/api/songs', songRouter);
   app.use('/api/assets', assetRouter);
+
+  // Development-only debug routes
+  if (env.nodeEnv !== 'production') {
+    app.use('/api/debug', debugRouter);
+  }
 
   return app;
 }

@@ -105,6 +105,15 @@ passport.use(
   )
 );
 
+if (!env.googleEnabled) {
+  // If Google OAuth isn't configured, avoid registering the strategy which
+  // would throw at startup when client ID/secret are missing.
+  // Other parts of the app check `env.googleEnabled` before using Google flows.
+  // This keeps the server bootable in environments without those env vars.
+  // eslint-disable-next-line no-console
+  console.warn('Google OAuth is not enabled (missing env vars). Skipping passport strategy registration.');
+}
+
 passport.serializeUser((user, done) => {
   done(null, user.id);
 });
