@@ -119,8 +119,9 @@ if (!env.googleEnabled) {
   console.warn('Google OAuth is not enabled (missing env vars). Skipping passport strategy registration.');
 }
 
-passport.serializeUser((user, done) => {
-  done(null, user.id);
+passport.serializeUser((user: unknown, done) => {
+  const id = (user as { id?: string } | null)?.id ?? undefined;
+  done(null, id);
 });
 
 passport.deserializeUser(async (id: string, done) => {

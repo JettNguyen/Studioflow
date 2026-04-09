@@ -71,7 +71,12 @@ export function ProjectPage() {
       {project.songs.length ? (
         <div className="song-list">
           {project.songs.map((song) => (
-            <article className="song-item" key={song.id}>
+            <Link
+              to={`/projects/${project.id}/songs/${song.id}`}
+              className="song-item"
+              key={song.id}
+              aria-label={`Open song ${song.title}`}
+            >
               <div>
                 <h3>{song.title}</h3>
                 <p>{song.status}</p>
@@ -79,9 +84,8 @@ export function ProjectPage() {
               <div className="chip-wrap">
                 <span>{song.assetCount} assets</span>
                 <span>{song.taskOpenCount} open tasks</span>
-                <Link to={`/projects/${project.id}/songs/${song.id}`}>Open song</Link>
               </div>
-            </article>
+            </Link>
           ))}
         </div>
       ) : (

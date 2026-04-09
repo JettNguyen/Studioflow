@@ -7,7 +7,7 @@ interface ProjectCardProps {
 
 export function ProjectCard({ project }: ProjectCardProps) {
   return (
-    <article className="project-card">
+    <Link to={`/projects/${project.id}`} className="project-card" aria-label={`Open project ${project.title}`}>
       <div className="project-card__head">
         <span className="badge">{project.genre}</span>
         <span>{project.collaboratorCount} collaborators</span>
@@ -16,8 +16,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
       <p>{project.description}</p>
       <div className="project-card__footer">
         <span>{project.songCount} songs</span>
-        <Link to={`/projects/${project.id}`}>Open project</Link>
       </div>
-    </article>
+    </Link>
   );
 }

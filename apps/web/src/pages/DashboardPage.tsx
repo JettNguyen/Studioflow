@@ -53,12 +53,18 @@ export function DashboardPage() {
       <article className="panel form-panel">
         <h3>Create Project</h3>
         <form className="inline-form" onSubmit={createProject}>
-          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Project title" required />
-          <input value={genre} onChange={(event) => setGenre(event.target.value)} placeholder="Genre (optional)" />
+          <input 
+            value={title} 
+            onChange={(event) => setTitle(event.target.value)} 
+            placeholder="Project title" required />
+          <input 
+            value={genre} 
+            onChange={(event) => setGenre(event.target.value)} 
+            placeholder="Genre (optional)" />
           <input
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            placeholder="Short description (optional)"
+            placeholder="Description (optional)"
           />
           <button className="button" type="submit">Create project</button>
         </form>
