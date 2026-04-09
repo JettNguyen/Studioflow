@@ -1,11 +1,11 @@
 :root {
-  --bg: #05070d;
-  --bg-soft: #101421;
-  --panel: rgba(16, 20, 33, 0.8);
+  --bg: #070707;
+  --bg-soft: #202020;
+  --panel: rgba(30, 30, 30, 0.8);
   --line: rgba(255, 255, 255, 0.1);
-  --text: #f4f5ff;
-  --muted: #a4adc4;
-  --accent: #00d6b3;
+  --text: #f5f5f5;
+  --muted: #a4a4a4;
+  --accent: #00a5b5;
   --accent-2: #ff7a59;
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
 }
@@ -16,16 +16,16 @@
 
 body {
   margin: 0;
-  font-family: 'Sora', sans-serif;
-  background: radial-gradient(circle at 20% 20%, #13203f 0%, #05070d 50%), linear-gradient(125deg, #05070d 0%, #090d17 100%);
+  font-family: 'Public Sans', sans-serif;
+  background: var(--bg);
   color: var(--text);
 }
 
 h1,
 h2,
 h3 {
-  font-family: 'Space Grotesk', sans-serif;
-  margin: 0;
+  font-family: 'Cal Sans', sans-serif;
+  margin: 0 0 10px 0;
 }
 
 a {
@@ -95,6 +95,14 @@ p {
   color: var(--text);
 }
 
+.topbar-actions {
+  justify-content: flex-end;
+}
+
+.topbar-user {
+  color: var(--muted);
+}
+
 .content-wrap {
   padding: 1.5rem;
 }
@@ -139,6 +147,116 @@ p {
   box-shadow: var(--shadow);
 }
 
+.form-panel,
+.empty-panel,
+.asset-empty {
+  margin-bottom: 1rem;
+}
+
+.inline-form,
+.stack-form,
+.auth-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.inline-form {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  align-items: center;
+}
+
+.inline-form input,
+.stack-form input,
+.stack-form textarea,
+.auth-form input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  padding: 0.8rem 0.9rem;
+  font: inherit;
+}
+
+.inline-form select,
+.stack-form select,
+.auth-form select {
+  appearance: none;
+  background-color: rgba(255, 255, 255, 0.03);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) calc(50% - 3px),
+    calc(100% - 10px) calc(50% - 3px);
+  background-repeat: no-repeat;
+  background-size: 6px 6px, 6px 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.72rem 2rem 0.72rem 0.9rem;
+  width: 100%;
+}
+
+.inline-form select:focus,
+.stack-form select:focus,
+.auth-form select:focus,
+.inline-form input:focus,
+.stack-form input:focus,
+.stack-form textarea:focus,
+.auth-form input:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, white 40%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+  outline: none;
+}
+
+.stack-form textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.auth-card {
+  width: min(100%, 460px);
+  display: grid;
+  gap: 1rem;
+  background: rgba(16, 20, 33, 0.9);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 1.5rem;
+  box-shadow: var(--shadow);
+}
+
+.auth-form label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+}
+
+.auth-google,
+.auth-toggle {
+  width: 100%;
+}
+
+.auth-toggle {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.form-error {
+  color: #ffb4a4;
+}
+
 .project-card__head,
 .project-card__footer,
 .chip-wrap {
@@ -174,6 +292,54 @@ p {
   padding: 0.75rem;
   display: grid;
   gap: 0.25rem;
+}
+
+.asset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.asset-actions .button {
+  padding: 0.35rem 0.75rem;
+}
+
+.asset-actions a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.asset-actions a:hover {
+  text-decoration: underline;
+}
+
+.media-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.75);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.media-modal__panel {
+  width: min(100%, 900px);
+  max-height: 90vh;
+  overflow: auto;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: #101010;
+  padding: 1rem;
+}
+
+.media-element {
+  width: 100%;
+}
+
+.media-inline {
+  margin-top: 0.5rem;
 }
 
 .workspace-grid {

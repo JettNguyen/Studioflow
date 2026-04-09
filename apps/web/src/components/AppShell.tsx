@@ -1,6 +1,9 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { useAuth } from '../auth/AuthContext';
 
 export function AppShell() {
+  const { user, logout } = useAuth();
+
   return (
     <div className="app-bg">
       <div className="orb orb-a" />
@@ -9,10 +12,15 @@ export function AppShell() {
         <h1>Studioflow</h1>
         <nav>
           <NavLink to="/">Projects</NavLink>
-          <a href="#">Drive Sync</a>
-          <a href="#">AI Lab</a>
+          <NavLink to="/drive-sync">Drive Sync</NavLink>
+          <NavLink to="/ai-lab">AI Lab</NavLink>
         </nav>
-        <button className="button button-ghost">Invite</button>
+        <div className="chip-wrap topbar-actions">
+          <span className="topbar-user">{user?.name}</span>
+          <button className="button button-ghost" onClick={() => logout()}>
+            Log out
+          </button>
+        </div>
       </header>
       <main className="content-wrap">
         <Outlet />
