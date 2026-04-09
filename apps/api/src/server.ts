@@ -5,4 +5,5 @@ const app = createApp();
 
 app.listen(env.port, () => {
   console.log(`Studioflow API running on http://localhost:${env.port}`);
+  console.log(`Google OAuth enabled: ${env.googleEnabled}`);
 });
