@@ -3,6 +3,8 @@ FROM node:20-alpine
 WORKDIR /app
 
 COPY package*.json ./
+COPY tsconfig.base.json ./
+COPY .editorconfig ./
 COPY apps ./apps
 COPY packages ./packages
 
