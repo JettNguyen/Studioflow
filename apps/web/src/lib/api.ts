@@ -1,5 +1,8 @@
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api';
-const apiOrigin = apiBaseUrl.replace(/\/api\/?$/, '');
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+const apiBaseUrl = configuredApiBaseUrl || (import.meta.env.PROD ? '/api' : 'http://localhost:4000/api');
+const apiOrigin = /^https?:\/\//i.test(apiBaseUrl)
+  ? apiBaseUrl.replace(/\/api\/?$/, '')
+  : '';
 
 interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown;
@@ -51,7 +54,7 @@ export function resolveApiUrl(path: string) {
   }
 
   if (path.startsWith('/api/')) {
-    return `${apiOrigin}${path}`;
+    return apiOrigin ? `${apiOrigin}${path}` : path;
   }
 
   return `${apiBaseUrl}${path}`;
