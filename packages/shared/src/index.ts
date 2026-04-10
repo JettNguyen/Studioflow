@@ -105,6 +105,7 @@ export interface SongWorkspace {
   projectId: string;
   title: string;
   status: string;
+  lyrics: string | null;
   key: string | null;
   bpm: number | null;
   assets: SongAsset[];

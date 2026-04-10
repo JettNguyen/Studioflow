@@ -160,11 +160,20 @@ songRouter.post('/project/:projectId', async (req, res) => {
     }
   }
 
+  // Determine position: append to end by finding current max position
+  const maxPos = await prisma.song.findFirst({
+    where: { projectId: req.params.projectId },
+    orderBy: { position: 'desc' }
+  });
+
+  const nextPosition = (maxPos?.position ?? -1) + 1;
+
   const song = await prisma.song.create({
     data: {
       projectId: req.params.projectId,
       title: parsed.data.title,
       status: parsed.data.status ?? 'Draft',
+      position: nextPosition,
       keySignature: parsed.data.key,
       bpm: parsed.data.bpm,
       driveFolderId
@@ -241,6 +250,45 @@ songRouter.get('/:songId', async (req, res) => {
   if (!song) {
     return res.status(404).json({ message: 'Song not found' });
   }
+
+  res.json(mapSongWorkspace(song));
+});
+
+const updateSongSchema = z.object({
+  title: z.string().min(1).max(120).optional(),
+  lyrics: z.string().max(100000).nullable().optional(),
+  key: z.string().max(30).nullable().optional(),
+  bpm: z.number().int().positive().max(400).nullable().optional(),
+});
+
+songRouter.patch('/:songId', async (req, res) => {
+  const parsed = updateSongSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Invalid payload', errors: parsed.error.flatten() });
+  }
+
+  const membership = await prisma.projectMembership.findFirst({
+    where: {
+      userId: req.user!.id,
+      project: { songs: { some: { id: req.params.songId } } }
+    }
+  });
+  if (!membership) return res.status(404).json({ message: 'Song not found' });
+
+  const song = await prisma.song.update({
+    where: { id: req.params.songId },
+    data: {
+      ...(parsed.data.title !== undefined && { title: parsed.data.title.trim() }),
+      ...(parsed.data.lyrics !== undefined && { lyrics: parsed.data.lyrics }),
+      ...(parsed.data.key !== undefined && { keySignature: parsed.data.key }),
+      ...(parsed.data.bpm !== undefined && { bpm: parsed.data.bpm }),
+    },
+    include: {
+      assets: { include: { notes: { include: { author: true }, orderBy: { createdAt: 'desc' } } } },
+      notes: { include: { author: true }, orderBy: { createdAt: 'desc' } },
+      tasks: { include: { assignee: true }, orderBy: { createdAt: 'desc' } },
+    }
+  });
 
   res.json(mapSongWorkspace(song));
 });
@@ -418,7 +466,14 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
     return res.status(400).json({ message: 'Invalid asset metadata payload', errors: parsedMetadata.error.flatten() });
   }
 
-  const inputAssetName = (req.body.name as string | undefined)?.trim() || req.file.originalname;
+  const userProvidedName = (req.body.name as string | undefined)?.trim() || '';
+  // If song audio has no explicit asset name, default to the song title.
+  // This keeps the asset name aligned with the song folder/title naming.
+  const inputAssetName = userProvidedName.length > 0
+    ? userProvidedName
+    : parsedMetadata.data.category === 'Song Audio'
+      ? song.title
+      : req.file.originalname;
   const versionGroup = slugifyVersionGroup(parsedMetadata.data.versionGroup || inputAssetName);
   const prismaCategory = toPrismaAssetCategory(parsedMetadata.data.category);
 

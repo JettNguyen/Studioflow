@@ -1,0 +1,78 @@
+.vthumb {
+  position: relative;
+  width: 100%;
+  border-radius: var(--r-2);
+  overflow: hidden;
+  background: #111;
+  /* padding-bottom set inline for aspect ratio */
+}
+
+.vthumb--clickable {
+  cursor: pointer;
+}
+
+.vthumb__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.vthumb__canvas--ready {
+  opacity: 1;
+}
+
+.vthumb__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  transition: background 0.15s;
+}
+
+.vthumb__overlay--ready {
+  background: rgba(0, 0, 0, 0);
+}
+
+.vthumb--clickable:hover .vthumb__overlay--ready {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.vthumb__play {
+  transform: scale(0.9);
+  transition: transform 0.15s;
+}
+
+.vthumb--clickable:hover .vthumb__play {
+  transform: scale(1.05);
+}
+
+/* Loading spinner */
+.vthumb__spinner {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: rgba(255, 255, 255, 0.6);
+  border-radius: 50%;
+  animation: vthumb-spin 0.7s linear infinite;
+}
+
+@keyframes vthumb-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Error state */
+.vthumb__error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+}

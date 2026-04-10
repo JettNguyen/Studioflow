@@ -1,0 +1,207 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import './WaveformPlayer.css';
+
+interface WaveformPlayerProps {
+  src: string;
+}
+
+function fmt(s: number): string {
+  if (!Number.isFinite(s) || s < 0) return '0:00';
+  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+}
+
+export function WaveformPlayer({ src }: WaveformPlayerProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const bufferRef = useRef<AudioBuffer | null>(null);
+  const animRef = useRef<number>(0);
+  const progressRef = useRef(0);
+
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [playing, setPlaying] = useState(false);
+  const [time, setTime] = useState(0);
+  const [dur, setDur] = useState(0);
+
+  const redraw = useCallback((progress: number) => {
+    const canvas = canvasRef.current;
+    const buf = bufferRef.current;
+    if (!canvas || !buf) return;
+
+    const W = canvas.offsetWidth;
+    const H = canvas.offsetHeight;
+    if (!W || !H) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const cw = Math.round(W * dpr);
+    const ch = Math.round(H * dpr);
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
+    }
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    const data = buf.getChannelData(0);
+    const barW = 2;
+    const gap = 1;
+    const count = Math.floor(W / (barW + gap));
+    const step = Math.max(1, Math.floor(data.length / count));
+    const mid = H / 2;
+    const playedCount = Math.round(progress * count);
+
+    for (let i = 0; i < count; i++) {
+      let mn = 0;
+      let mx = 0;
+      const base = i * step;
+      for (let j = 0; j < step; j++) {
+        const v = data[base + j] ?? 0;
+        if (v < mn) mn = v;
+        if (v > mx) mx = v;
+      }
+      const h = Math.max(1.5, Math.abs(mx - mn) * mid * 0.9);
+      ctx.fillStyle = i < playedCount ? 'rgba(117,160,245,0.88)' : 'rgba(117,160,245,0.26)';
+      ctx.fillRect(i * (barW + gap), mid - h, barW, h * 2);
+    }
+
+    // Playhead
+    if (progress > 0 && progress < 1) {
+      const px = Math.max(0, Math.round(playedCount * (barW + gap)) - 1);
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.fillRect(px, 0, 1, H);
+    }
+  }, []);
+
+  // Load + decode waveform data
+  useEffect(() => {
+    setStatus('loading');
+    setPlaying(false);
+    setTime(0);
+    progressRef.current = 0;
+    bufferRef.current = null;
+
+    const ctrl = new AbortController();
+
+    (async () => {
+      try {
+        const res = await fetch(src, { credentials: 'include', signal: ctrl.signal });
+        if (!res.ok) throw new Error('fetch');
+        const ab = await res.arrayBuffer();
+        if (ctrl.signal.aborted) return;
+        const ac = new AudioContext();
+        const buf = await ac.decodeAudioData(ab);
+        void ac.close();
+        if (ctrl.signal.aborted) return;
+        bufferRef.current = buf;
+        setStatus('ready');
+      } catch (e) {
+        if ((e as Error).name !== 'AbortError') setStatus('error');
+      }
+    })();
+
+    return () => ctrl.abort();
+  }, [src]);
+
+  // Redraw on resize once ready
+  useEffect(() => {
+    if (status !== 'ready') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ro = new ResizeObserver(() => redraw(progressRef.current));
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, [status, redraw]);
+
+  // Playback animation loop
+  useEffect(() => {
+    if (!playing) return;
+    const tick = () => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      const t = audio.currentTime;
+      const d = audio.duration || 1;
+      progressRef.current = t / d;
+      setTime(t);
+      redraw(t / d);
+      animRef.current = requestAnimationFrame(tick);
+    };
+    animRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animRef.current);
+  }, [playing, redraw]);
+
+  const toggle = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) {
+      audio.pause();
+      setPlaying(false);
+    } else {
+      audio.play().catch(() => setPlaying(false));
+      setPlaying(true);
+    }
+  };
+
+  const seek = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    const audio = audioRef.current;
+    if (!canvas || !audio || !dur) return;
+    const { left, width } = canvas.getBoundingClientRect();
+    const p = Math.max(0, Math.min(1, (e.clientX - left) / width));
+    audio.currentTime = p * dur;
+    progressRef.current = p;
+    setTime(p * dur);
+    redraw(p);
+  };
+
+  return (
+    <div className="wfp">
+      <audio
+        ref={audioRef}
+        src={src}
+        crossOrigin="use-credentials"
+        onLoadedMetadata={e => setDur((e.target as HTMLAudioElement).duration)}
+        onEnded={() => { setPlaying(false); progressRef.current = 0; setTime(0); redraw(0); }}
+      />
+
+      <button
+        className={`wfp-btn${playing ? ' wfp-btn--playing' : ''}`}
+        type="button"
+        onClick={toggle}
+        disabled={status !== 'ready'}
+        aria-label={playing ? 'Pause' : 'Play'}
+      >
+        {playing ? (
+          <svg width="8" height="10" viewBox="0 0 8 10" fill="currentColor" aria-hidden="true">
+            <rect x="0" y="0" width="2.8" height="10" rx="0.8" />
+            <rect x="5.2" y="0" width="2.8" height="10" rx="0.8" />
+          </svg>
+        ) : (
+          <svg width="9" height="11" viewBox="0 0 9 11" fill="currentColor" aria-hidden="true">
+            <path d="M1 1L8.5 5.5L1 10V1Z" />
+          </svg>
+        )}
+      </button>
+
+      <div className="wfp-track">
+        {status === 'loading' && <span className="wfp-msg">Loading waveform...</span>}
+        {status === 'error' && <span className="wfp-msg wfp-msg--err">Audio unavailable</span>}
+        {status === 'ready' && (
+          <canvas
+            ref={canvasRef}
+            className="wfp-canvas"
+            onClick={seek}
+            title="Click to seek"
+          />
+        )}
+      </div>
+
+      <span className="wfp-time">
+        <span className="wfp-time-cur">{fmt(time)}</span>
+        <span className="wfp-sep">/</span>
+        <span className="wfp-time-dur">{fmt(dur)}</span>
+      </span>
+    </div>
+  );
+}

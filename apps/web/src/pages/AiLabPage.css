@@ -1,0 +1,47 @@
+.ailab-placeholder {
+  display: flex;
+  align-items: flex-start;
+  gap: 15px;
+}
+
+.ailab-placeholder__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-3);
+  background: var(--accent-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ailab-placeholder__body h3 {
+  margin-bottom: 5px;
+}
+
+.ailab-coming-soon {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.ailab-feature {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.ailab-feature::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  opacity: 0.5;
+}

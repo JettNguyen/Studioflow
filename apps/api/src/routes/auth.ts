@@ -101,11 +101,23 @@ authRouter.get('/google', (req, res, next) => {
     return res.status(503).json({ message: 'Google OAuth is not configured yet' });
   }
 
-  const authenticator = passport.authenticate('google', {
+  const authOptions: Record<string, unknown> = {
     accessType: 'offline',
-    prompt: 'consent',
     session: false
-  });
+  };
+
+  // Only force the consent screen when explicitly requested (e.g. reauth flow).
+  // `prompt: 'consent'` makes Google show the consent screen every time,
+  // so we avoid it by default to prevent repeated prompts.
+  const reauth = String(req.query.reauth ?? '').toLowerCase();
+  if (reauth === '1' || reauth === 'true') {
+    // Useful when you need to obtain a fresh refresh token or re-consent.
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore passport accepts this option in authenticate()
+    authOptions.prompt = 'consent';
+  }
+
+  const authenticator = passport.authenticate('google', authOptions);
 
   authenticator(req, res, next);
 });

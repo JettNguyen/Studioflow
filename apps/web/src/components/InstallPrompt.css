@@ -1,0 +1,104 @@
+.install-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--surface-raised);
+  border-top: 1px solid var(--border-mid);
+  /* Sits at the bottom of the viewport, above iOS home indicator */
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  /* Slide up from off-screen */
+  animation: install-banner-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes install-banner-in {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.install-banner__icon {
+  width: 34px;
+  height: 34px;
+  background: var(--accent);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.install-banner__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.install-banner__title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.install-banner__sub {
+  font-size: 0.75rem;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.install-banner__cta {
+  flex-shrink: 0;
+}
+
+.install-banner__close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: var(--r-1);
+  flex-shrink: 0;
+  padding: 0;
+  transition: color 0.12s, background 0.12s;
+}
+
+.install-banner__close:hover {
+  color: var(--text-2);
+  background: var(--surface-hover);
+}
+
+/* On desktop the banner looks odd — constrain its width and center it */
+@media (min-width: 640px) {
+  .install-banner {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    bottom: 20px;
+    width: min(420px, calc(100vw - 32px));
+    border-radius: var(--r-3);
+    border: 1px solid var(--border-mid);
+    padding-bottom: 10px;
+    box-shadow: var(--shadow-lg);
+  }
+
+  @keyframes install-banner-in {
+    from { transform: translateX(-50%) translateY(20px); opacity: 0; }
+    to   { transform: translateX(-50%) translateY(0);    opacity: 1; }
+  }
+}

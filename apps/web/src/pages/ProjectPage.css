@@ -1,0 +1,94 @@
+.project-drive-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.project-drive-note {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+/* Create song form */
+.project-create {
+  margin-bottom: 20px;
+}
+
+/* Song list */
+.song-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.song-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+  text-decoration: none;
+  transition: border-color 0.2s, background-color 0.2s;
+  gap: 10px;
+}
+
+.song-list-item {
+  transition: transform 0.12s ease;
+}
+
+.song-row:hover {
+  border-color: var(--border-mid);
+  background: var(--surface-raised);
+}
+
+.song-row__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.song-row__main h3 {
+  font-size: 14px;
+  margin-bottom: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.song-row__status {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.song-row__stats {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-shrink: 0;
+}
+
+.song-row__stat {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+/* Drag handle */
+.drag-handle {
+  width: 26px;
+  text-align: center;
+  cursor: grab;
+  user-select: none;
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.song-list-item.drag-over .song-row {
+  border-style: dashed;
+  background: var(--surface-raised);
+}
+
+.song-row.dragging {
+  opacity: 0.6;
+}

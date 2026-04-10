@@ -2,6 +2,7 @@ import type { CreateProjectRequest, ProjectDetails, ProjectSummary } from '@stud
 import { useEffect, useState, type FormEvent } from 'react';
 import { apiRequest } from '../lib/api';
 import { ProjectCard } from '../components/ProjectCard';
+import './DashboardPage.css';
 
 export function DashboardPage() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -43,33 +44,41 @@ export function DashboardPage() {
 
   return (
     <section>
-      <div className="section-head">
-        <div>
-          <h2>Your Music Projects</h2>
-          <p>All songs, stems, notes, and tasks in one place.</p>
+      <div className="page-header">
+        <div className="page-header__main">
+          <h2>Projects</h2>
+          <p>Songs, stems, notes, and tasks — all in one place.</p>
         </div>
       </div>
 
-      <article className="panel form-panel">
-        <h3>Create Project</h3>
-        <form className="inline-form" onSubmit={createProject}>
-          <input 
-            value={title} 
-            onChange={(event) => setTitle(event.target.value)} 
-            placeholder="Project title" required />
-          <input 
-            value={genre} 
-            onChange={(event) => setGenre(event.target.value)} 
-            placeholder="Genre (optional)" />
-          <input
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="Description (optional)"
-          />
-          <button className="button" type="submit">Create project</button>
-        </form>
-        {error ? <p className="form-error">{error}</p> : null}
-      </article>
+      <div className="dashboard-create">
+        <p className="dashboard-create__title">New project</p>
+        <div className="card">
+          <form className="form-row" onSubmit={createProject}>
+            <input
+              className="input"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Project title"
+              required
+            />
+            <input
+              className="input"
+              value={genre}
+              onChange={(e) => setGenre(e.target.value)}
+              placeholder="Genre (optional)"
+            />
+            <input
+              className="input"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Description (optional)"
+            />
+            <button className="btn btn-primary" type="submit">Create</button>
+          </form>
+          {error && <p className="form-error" style={{ marginTop: '10px' }}>{error}</p>}
+        </div>
+      </div>
 
       {projects.length ? (
         <div className="project-grid">
@@ -78,10 +87,10 @@ export function DashboardPage() {
           ))}
         </div>
       ) : (
-        <article className="panel empty-panel">
+        <div className="empty-state">
           <h3>No projects yet</h3>
           <p>Create your first project to start organizing songs, notes, and collaborators.</p>
-        </article>
+        </div>
       )}
     </section>
   );

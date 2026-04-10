@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.env
+.env.*
+apps/api/uploads
+**/uploads
+apps/web/.vite
+**/.vite
+coverage
+**/*.log
+.DS_Store
+infra
+tools
+README.md

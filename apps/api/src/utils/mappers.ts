@@ -151,6 +151,7 @@ export function mapSongWorkspace(
     projectId: song.projectId,
     title: song.title,
     status: song.status,
+    lyrics: song.lyrics ?? null,
     key: song.keySignature ?? null,
     bpm: song.bpm ?? null,
     assets: song.assets.map((asset) => ({

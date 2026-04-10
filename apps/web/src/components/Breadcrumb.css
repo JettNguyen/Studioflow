@@ -1,0 +1,96 @@
+.bc-bar {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+/* ── Back button — always visible ── */
+.bc-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  text-decoration: none;
+  padding: 5px 10px;
+  border: 1px solid var(--border-mid);
+  border-radius: var(--r-2);
+  flex-shrink: 0;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+  min-height: 30px;
+}
+
+.bc-back:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.bc-back svg {
+  flex-shrink: 0;
+}
+
+/* ── Breadcrumb trail — hidden on mobile ── */
+.bc-trail {
+  min-width: 0;
+}
+
+.bc-trail__list {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text-2);
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.bc-trail__item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.bc-trail__item:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.bc-trail__item:last-child span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.bc-trail a {
+  color: var(--text-2);
+  text-decoration: none;
+  transition: color 0.15s;
+  white-space: nowrap;
+}
+
+.bc-trail a:hover {
+  color: var(--text);
+}
+
+.bc-trail__sep {
+  color: var(--text-3);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+/* Hide trail on mobile, keep back button */
+@media (max-width: 640px) {
+  .bc-trail {
+    display: none;
+  }
+}

@@ -101,6 +101,9 @@ model Song {
   projectId    String
   title        String
   status       String    @default("Draft")
+  // Position is used for manual ordering in the UI. Lower numbers appear first.
+  position     Int?
+  lyrics       String?
   keySignature String?
   bpm          Int?
   driveFolderId String?

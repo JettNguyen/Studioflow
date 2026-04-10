@@ -1,0 +1,214 @@
+/* ─────────────────────────────────────────────────────────────
+   TOPBAR
+   Layout: [Brand] [Nav (fills middle)] [Actions (right)]
+   At any width the three regions stay in that left→mid→right order.
+   On mobile the nav drops to a second row that scrolls horizontally.
+───────────────────────────────────────────────────────────────*/
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 40;
+
+  /* Base size */
+  height: 54px;
+  padding: 0 20px;
+
+  /* iOS standalone safe-area: status bar overlaps when using black-translucent */
+  padding-top: env(safe-area-inset-top);
+  height: calc(54px + env(safe-area-inset-top));
+  padding-left: calc(20px + env(safe-area-inset-left));
+  padding-right: calc(20px + env(safe-area-inset-right));
+}
+
+/* ── Brand ── */
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  flex-shrink: 0;
+  /* Explicit order so flex-wrap doesn't reorder on resize */
+  order: 1;
+}
+
+.topbar__logo-mark {
+  width: 26px;
+  height: 26px;
+  background: var(--accent);
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.topbar__brand-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+/* ── Nav (middle) ── */
+.topbar__nav {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  /* Fills the space between brand and actions */
+  flex: 1;
+  /* Prevent nav links from ever overflowing and breaking the layout */
+  min-width: 0;
+  overflow: hidden;
+  order: 2;
+}
+
+.topbar__nav-link {
+  /* 44px touch target */
+  min-height: 44px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  color: var(--text-2);
+  border-radius: var(--r-2);
+  transition: color 0.12s, background 0.12s;
+  text-decoration: none;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+
+.topbar__nav-link:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.topbar__nav-link.active {
+  color: var(--text);
+  background: var(--surface-raised);
+}
+
+/* ── Actions (right) ── */
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  /* Pushes cleanly to the right */
+  margin-left: auto;
+  order: 3;
+}
+
+/* Profile avatar button */
+.topbar__profile-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-mid);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-display);
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.topbar__profile-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.topbar__profile-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ── Page content ── */
+.page-content {
+  padding: 30px;
+  max-width: 1300px;
+  margin: 0 auto;
+  width: 100%;
+  padding-bottom: calc(30px + env(safe-area-inset-bottom));
+  padding-left: calc(30px + env(safe-area-inset-left));
+  padding-right: calc(30px + env(safe-area-inset-right));
+}
+
+/* ─────────────────────────────────────────────────────────────
+   RESPONSIVE
+   640px: hide brand name, nav goes to its own scrollable row
+───────────────────────────────────────────────────────────────*/
+@media (max-width: 900px) {
+  .topbar__brand-name {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    /* Two-row layout: brand+actions on row 1, nav on row 2 */
+    flex-wrap: wrap;
+    height: auto;
+    padding: 0 15px;
+    padding-top: env(safe-area-inset-top);
+    padding-left: calc(15px + env(safe-area-inset-left));
+    padding-right: calc(15px + env(safe-area-inset-right));
+    padding-bottom: 5px;
+    gap: 0;
+  }
+
+  .topbar__brand {
+    /* Row 1 left — flex:1 pushes actions to the right */
+    flex: 1;
+    padding-top: 10px;
+    padding-bottom: 5px;
+  }
+
+  .topbar__actions {
+    /* Row 1 right */
+    order: 2;
+    padding-top: 10px;
+    padding-bottom: 5px;
+  }
+
+  .topbar__nav {
+    /* Row 2 — full width, scrollable */
+    order: 3;
+    flex: none;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 8px;
+    gap: 0;
+  }
+
+  .topbar__nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .page-content {
+    padding: 15px;
+    padding-bottom: calc(80px + env(safe-area-inset-bottom));
+    padding-left: calc(15px + env(safe-area-inset-left));
+    padding-right: calc(15px + env(safe-area-inset-right));
+  }
+}

@@ -11,672 +11,782 @@ import type {
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import { apiRequest, apiUpload, resolveApiUrl } from '../lib/api';
+import { Breadcrumb } from '../components/Breadcrumb';
+import { WaveformPlayer } from '../components/WaveformPlayer';
+import { VideoThumbnail } from '../components/VideoThumbnail';
 import './SongWorkspacePage.css';
 
-const categoryOrder: AssetCategory[] = [
-  'Song Audio',
-  'Social Media Content',
-  'Videos',
-  'Beat',
-  'Stems'
-];
+type SongWorkspaceWithLyrics = SongWorkspace & { lyrics?: string | null };
 
-function formatDuration(durationInSeconds: number) {
-  if (!Number.isFinite(durationInSeconds) || durationInSeconds <= 0) {
-    return null;
-  }
+const VERSIONED_CATEGORIES: AssetCategory[] = ['Song Audio', 'Videos', 'Beat', 'Stems'];
+const CATEGORY_ORDER: AssetCategory[] = ['Song Audio', 'Beat', 'Stems', 'Videos', 'Social Media Content'];
 
-  const rounded = Math.round(durationInSeconds);
-  const minutes = Math.floor(rounded / 60);
-  const seconds = rounded % 60;
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmtBytes(bytes: number | null): string | null {
+  if (!bytes || bytes <= 0) return null;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function prettifyAssetType(asset: SongAsset) {
-  if (asset.type.startsWith('audio/')) {
-    const subtype = asset.type.split('/')[1]?.toUpperCase() || 'AUDIO';
-    return `${subtype} Audio`;
-  }
-
-  if (asset.type.startsWith('video/')) {
-    const subtype = asset.type.split('/')[1]?.toUpperCase() || 'VIDEO';
-    return `${subtype} Video`;
-  }
-
-  return asset.type;
+function fmtType(type: string): string {
+  if (type.startsWith('audio/')) return (type.split('/')[1] ?? 'audio').toUpperCase();
+  if (type.startsWith('video/')) return (type.split('/')[1] ?? 'video').toUpperCase();
+  return type;
 }
 
-function formatFileSize(bytes: number | null) {
-  if (!bytes || bytes <= 0) {
-    return null;
-  }
-
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(0)} KB`;
-  }
-
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  const hrs = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  if (hrs < 24) return `${hrs}h ago`;
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-async function readFileDuration(file: File) {
-  const mediaKind = file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'other';
+function fmtAbsolute(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+  });
+}
 
-  if (mediaKind === 'other') {
-    return null;
-  }
-
-  const objectUrl = URL.createObjectURL(file);
-
+async function readFileDuration(file: File): Promise<string | null> {
+  const kind = file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : null;
+  if (!kind) return null;
+  const url = URL.createObjectURL(file);
   try {
-    const media = document.createElement(mediaKind === 'video' ? 'video' : 'audio');
-    media.preload = 'metadata';
-
+    const el = document.createElement(kind);
+    el.preload = 'metadata';
     return await new Promise<string | null>((resolve) => {
-      const cleanup = () => {
-        URL.revokeObjectURL(objectUrl);
+      el.onloadedmetadata = () => {
+        URL.revokeObjectURL(url);
+        const s = Math.round(el.duration);
+        resolve(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
       };
-
-      media.onloadedmetadata = () => {
-        const formatted = formatDuration(media.duration);
-        cleanup();
-        resolve(formatted);
-      };
-
-      media.onerror = () => {
-        cleanup();
-        resolve(null);
-      };
-
-      media.src = objectUrl;
+      el.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+      el.src = url;
     });
   } catch {
-    URL.revokeObjectURL(objectUrl);
+    URL.revokeObjectURL(url);
     return null;
   }
 }
 
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export function SongWorkspacePage() {
-  const { songId } = useParams();
-  const [song, setSong] = useState<SongWorkspace | null>(null);
-  const [noteBody, setNoteBody] = useState('');
-  const [taskTitle, setTaskTitle] = useState('');
+  const { projectId, songId } = useParams();
+  const [song, setSong] = useState<SongWorkspaceWithLyrics | null>(null);
+  const [projectTitle, setProjectTitle] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Upload form
+  const [uploadOpen, setUploadOpen] = useState(false);
   const [assetName, setAssetName] = useState('');
   const [assetCategory, setAssetCategory] = useState<AssetCategory>('Song Audio');
   const [assetVersionGroup, setAssetVersionGroup] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [activeAudioAssetId, setActiveAudioAssetId] = useState<string | null>(null);
-  const [activeVideoAsset, setActiveVideoAsset] = useState<SongAsset | null>(null);
-  const [selectedVersionByGroup, setSelectedVersionByGroup] = useState<Record<string, string>>({});
-  const [assetNoteDrafts, setAssetNoteDrafts] = useState<Record<string, string>>({});
-  const [error, setError] = useState<string | null>(null);
-
-  const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const activeVideoAssetUrl = useMemo(
-    () => (activeVideoAsset?.streamUrl ? resolveApiUrl(activeVideoAsset.streamUrl) : null),
+  // Key/BPM inline edit
+  const [editingMeta, setEditingMeta] = useState(false);
+  const [editKey, setEditKey] = useState('');
+  const [editBpm, setEditBpm] = useState('');
+
+  // Notes + tasks
+  const [noteBody, setNoteBody] = useState('');
+  const [taskTitle, setTaskTitle] = useState('');
+  const [lyricsDraft, setLyricsDraft] = useState('');
+  const [savingLyrics, setSavingLyrics] = useState(false);
+
+  // Per-asset notes
+  const [assetNoteDrafts, setAssetNoteDrafts] = useState<Record<string, string>>({});
+  const [openAssetNotes, setOpenAssetNotes] = useState<Set<string>>(new Set());
+
+  // Version selection
+  const [selectedVersionByGroup, setSelectedVersionByGroup] = useState<Record<string, string>>({});
+
+  // Video modal — no auto-fullscreen, user can fullscreen manually from controls
+  const [activeVideoAsset, setActiveVideoAsset] = useState<SongAsset | null>(null);
+  const activeVideoUrl = useMemo(
+    () => activeVideoAsset?.streamUrl ? resolveApiUrl(activeVideoAsset.streamUrl) : null,
     [activeVideoAsset]
   );
 
+  // ── Data ──────────────────────────────────────────────────────────────────
+
   const groupedSections = useMemo(() => {
-    if (!song) {
-      return [] as Array<{ category: AssetCategory; groups: Array<{ groupKey: string; versions: SongAsset[] }> }>;
-    }
-
-    return categoryOrder.map((category) => {
-      const categoryAssets = song.assets.filter((asset) => asset.category === category);
-      const groupMap = new Map<string, SongAsset[]>();
-
-      for (const asset of categoryAssets) {
-        const key = asset.versionGroup;
-        const existing = groupMap.get(key) ?? [];
+    if (!song) return [] as Array<{ category: AssetCategory; groups: Array<{ groupKey: string; versions: SongAsset[] }> }>;
+    return VERSIONED_CATEGORIES.map(category => {
+      const assets = song.assets.filter(a => a.category === category);
+      const map = new Map<string, SongAsset[]>();
+      for (const asset of assets) {
+        const existing = map.get(asset.versionGroup) ?? [];
         existing.push(asset);
-        groupMap.set(key, existing);
+        map.set(asset.versionGroup, existing);
       }
-
-      const groups = Array.from(groupMap.entries())
+      const groups = Array.from(map.entries())
         .map(([groupKey, versions]) => ({
           groupKey,
           versions: versions.sort((a, b) => b.versionNumber - a.versionNumber)
         }))
         .sort((a, b) => {
-          const aLatest = a.versions[0];
-          const bLatest = b.versions[0];
-          return new Date(bLatest.createdAt).getTime() - new Date(aLatest.createdAt).getTime();
+          const al = a.versions[0];
+          const bl = b.versions[0];
+          return new Date(bl.createdAt).getTime() - new Date(al.createdAt).getTime();
         });
-
       return { category, groups };
     });
   }, [song]);
 
-  useEffect(() => {
-    if (!songId) {
-      return;
-    }
-
-    apiRequest<SongWorkspace>(`/songs/${songId}`)
-      .then((loadedSong) => {
-        setSong(loadedSong);
-        setError(null);
-      })
-      .catch((loadError) => {
-        setError(loadError instanceof Error ? loadError.message : 'Unable to load song');
-      });
-  }, [songId]);
+  const smcAssets = useMemo(() => {
+    if (!song) return [];
+    return song.assets
+      .filter(a => a.category === 'Social Media Content')
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [song]);
 
   useEffect(() => {
-    const defaults: Record<string, string> = {};
-
-    for (const section of groupedSections) {
-      for (const group of section.groups) {
-        const composedKey = `${section.category}::${group.groupKey}`;
-        defaults[composedKey] = group.versions[0]?.id;
-      }
-    }
-
-    setSelectedVersionByGroup((current) => {
+    setSelectedVersionByGroup(current => {
       const next = { ...current };
-      for (const [key, value] of Object.entries(defaults)) {
-        if (!next[key]) {
-          next[key] = value;
+      for (const section of groupedSections) {
+        for (const group of section.groups) {
+          const key = `${section.category}::${group.groupKey}`;
+          if (!next[key]) next[key] = group.versions[0]?.id ?? '';
         }
       }
       return next;
     });
   }, [groupedSections]);
 
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+
   useEffect(() => {
-    if (activeVideoAsset?.mediaKind !== 'video' || !videoRef.current) {
-      return;
-    }
+    if (!songId) return;
+    apiRequest<SongWorkspaceWithLyrics>(`/songs/${songId}`)
+      .then(s => { setSong(s); setLyricsDraft(s.lyrics ?? ''); setError(null); })
+      .catch(e => setError(e instanceof Error ? e.message : 'Unable to load song'));
+  }, [songId]);
 
-    const fullscreen = videoRef.current.requestFullscreen?.();
-    if (fullscreen && typeof fullscreen.catch === 'function') {
-      fullscreen.catch(() => undefined);
-    }
-  }, [activeVideoAsset]);
-
-  const handlePlaybackError = () => {
-    setError('Unable to stream this media file. Please verify API session and storage access.');
-  };
+  useEffect(() => {
+    if (!projectId) return;
+    apiRequest<{ id: string; title: string }>(`/projects/${projectId}`)
+      .then(p => setProjectTitle(p.title))
+      .catch(() => {/* breadcrumb label just stays null */});
+  }, [projectId]);
 
   const refreshSong = async () => {
-    if (!songId) {
-      return;
-    }
-
-    const updatedSong = await apiRequest<SongWorkspace>(`/songs/${songId}`);
-    setSong(updatedSong);
+    if (!songId) return;
+    const s = await apiRequest<SongWorkspaceWithLyrics>(`/songs/${songId}`);
+    setSong(s);
+    setLyricsDraft(s.lyrics ?? '');
   };
 
-  const createNote = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  // ── Actions ───────────────────────────────────────────────────────────────
 
-    if (!songId || !song) {
-      return;
-    }
-
+  const uploadAsset = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!songId || !selectedFile) { setError('Please choose a file.'); return; }
     try {
-      const created = await apiRequest<SongWorkspace['notes'][number]>(`/songs/${songId}/notes`, {
-        method: 'POST',
-        body: {
-          body: noteBody
-        } satisfies CreateNoteRequest
-      });
-      setSong({ ...song, notes: [created, ...song.notes] });
-      setNoteBody('');
-      setError(null);
-    } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Unable to add note');
-    }
-  };
-
-  const createTask = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!songId || !song) {
-      return;
-    }
-
-    try {
-      const created = await apiRequest<SongWorkspace['tasks'][number]>(`/songs/${songId}/tasks`, {
-        method: 'POST',
-        body: {
-          title: taskTitle
-        } satisfies CreateTaskRequest
-      });
-      setSong({ ...song, tasks: [created, ...song.tasks] });
-      setTaskTitle('');
-      setError(null);
-    } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Unable to add task');
-    }
-  };
-
-  const uploadAsset = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!songId || !selectedFile) {
-      setError('Please choose a file to upload.');
-      return;
-    }
-
-    try {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('category', assetCategory);
-
-      if (assetName.trim()) {
-        formData.append('name', assetName.trim());
-      }
-
-      if (assetVersionGroup.trim()) {
-        formData.append('versionGroup', assetVersionGroup.trim());
-      }
-
-      const duration = await readFileDuration(selectedFile);
-      if (duration) {
-        formData.append('duration', duration);
-      }
-
-      await apiUpload<SongWorkspace['assets'][number]>(`/songs/${songId}/assets`, formData, {
-        method: 'POST'
-      });
-
-      setAssetName('');
-      setAssetVersionGroup('');
-      setSelectedFile(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-
+      const fd = new FormData();
+      fd.append('file', selectedFile);
+      fd.append('category', assetCategory);
+      if (assetName.trim()) fd.append('name', assetName.trim());
+      if (assetVersionGroup.trim()) fd.append('versionGroup', assetVersionGroup.trim());
+      const dur = await readFileDuration(selectedFile);
+      if (dur) fd.append('duration', dur);
+      await apiUpload<SongAsset>(`/songs/${songId}/assets`, fd, { method: 'POST' });
+      setAssetName(''); setAssetVersionGroup(''); setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       await refreshSong();
       setError(null);
-    } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : 'Unable to upload file');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
     }
+  };
+
+  const saveMeta = async () => {
+    if (!songId) return;
+    try {
+      const bpmNum = editBpm.trim() ? parseInt(editBpm, 10) : null;
+      const updated = await apiRequest<SongWorkspace>(`/songs/${songId}`, {
+        method: 'PATCH',
+        body: {
+          key: editKey.trim() || null,
+          bpm: bpmNum && Number.isFinite(bpmNum) ? bpmNum : null,
+        }
+      });
+      setSong(updated);
+      setEditingMeta(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    }
+  };
+
+  const saveLyrics = async () => {
+    if (!songId) return;
+    try {
+      setSavingLyrics(true);
+      const updated = await apiRequest<SongWorkspaceWithLyrics>(`/songs/${songId}`, {
+        method: 'PATCH',
+        body: {
+          lyrics: lyricsDraft.trim().length ? lyricsDraft : null,
+        }
+      });
+      setSong(updated);
+      setLyricsDraft(updated.lyrics ?? '');
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save lyrics');
+    } finally {
+      setSavingLyrics(false);
+    }
+  };
+
+  const startEditMeta = () => {
+    setEditKey(song?.key ?? '');
+    setEditBpm(song?.bpm?.toString() ?? '');
+    setEditingMeta(true);
+  };
+
+  const createNote = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!songId || !song) return;
+    try {
+      const note = await apiRequest<SongWorkspace['notes'][number]>(`/songs/${songId}/notes`, {
+        method: 'POST', body: { body: noteBody } satisfies CreateNoteRequest
+      });
+      setSong({ ...song, notes: [note, ...song.notes] });
+      setNoteBody(''); setError(null);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to add note'); }
+  };
+
+  const createTask = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!songId || !song) return;
+    try {
+      const task = await apiRequest<SongWorkspace['tasks'][number]>(`/songs/${songId}/tasks`, {
+        method: 'POST', body: { title: taskTitle } satisfies CreateTaskRequest
+      });
+      setSong({ ...song, tasks: [task, ...song.tasks] });
+      setTaskTitle(''); setError(null);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to add task'); }
   };
 
   const updateTaskStatus = async (taskId: string, status: SongTaskStatus) => {
-    if (!songId || !song) {
-      return;
-    }
-
+    if (!songId || !song) return;
     try {
-      const updated = await apiRequest<SongWorkspace['tasks'][number]>(`/songs/${songId}/tasks/${taskId}`, {
-        method: 'PATCH',
-        body: {
-          status
-        } satisfies UpdateTaskStatusRequest
-      });
-
-      setSong({
-        ...song,
-        tasks: song.tasks.map((task) => (task.id === taskId ? updated : task))
-      });
-      setError(null);
-    } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : 'Unable to update task status');
-    }
+      const updated = await apiRequest<SongWorkspace['tasks'][number]>(
+        `/songs/${songId}/tasks/${taskId}`,
+        { method: 'PATCH', body: { status } satisfies UpdateTaskStatusRequest }
+      );
+      setSong({ ...song, tasks: song.tasks.map(t => t.id === taskId ? updated : t) });
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to update task'); }
   };
 
   const removeAsset = async (asset: SongAsset) => {
-    if (!song) {
-      return;
-    }
-
-    const confirmed = window.confirm(`Remove asset "${asset.name}"? This cannot be undone.`);
-    if (!confirmed) {
-      return;
-    }
-
+    if (!song || !window.confirm(`Remove "${asset.name}"? This cannot be undone.`)) return;
     try {
       await apiRequest(`/assets/${asset.id}`, { method: 'DELETE' });
-      setSong({
-        ...song,
-        assets: song.assets.filter((item) => item.id !== asset.id)
-      });
-
-      if (activeAudioAssetId === asset.id) {
-        setActiveAudioAssetId(null);
-      }
-
-      if (activeVideoAsset?.id === asset.id) {
-        setActiveVideoAsset(null);
-      }
-
-      setSelectedVersionByGroup((current) => {
-        const next = { ...current };
-        for (const [key, value] of Object.entries(next)) {
-          if (value === asset.id) {
-            delete next[key];
-          }
-        }
-        return next;
-      });
-
-      setError(null);
-    } catch (removeError) {
-      setError(removeError instanceof Error ? removeError.message : 'Unable to remove asset');
-    }
+      setSong({ ...song, assets: song.assets.filter(a => a.id !== asset.id) });
+      if (activeVideoAsset?.id === asset.id) setActiveVideoAsset(null);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to remove asset'); }
   };
 
   const addAssetNote = async (asset: SongAsset) => {
-    const draft = (assetNoteDrafts[asset.id] || '').trim();
-    if (!draft) {
-      return;
-    }
-
+    const body = (assetNoteDrafts[asset.id] ?? '').trim();
+    if (!body || !song) return;
     try {
-      const created = await apiRequest<SongAsset['notes'][number]>(`/assets/${asset.id}/notes`, {
-        method: 'POST',
-        body: {
-          body: draft
-        } satisfies CreateAssetNoteRequest
+      const note = await apiRequest<SongAsset['notes'][number]>(`/assets/${asset.id}/notes`, {
+        method: 'POST', body: { body } satisfies CreateAssetNoteRequest
       });
-
-      if (!song) {
-        return;
-      }
-
-      setSong({
-        ...song,
-        assets: song.assets.map((item) =>
-          item.id === asset.id
-            ? {
-                ...item,
-                notes: [created, ...item.notes]
-              }
-            : item
-        )
-      });
-
-      setAssetNoteDrafts((current) => ({ ...current, [asset.id]: '' }));
-      setError(null);
-    } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Unable to add file note');
-    }
+      setSong({ ...song, assets: song.assets.map(a => a.id === asset.id ? { ...a, notes: [note, ...a.notes] } : a) });
+      setAssetNoteDrafts(d => ({ ...d, [asset.id]: '' }));
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to add note'); }
   };
 
-  if (!song) {
-    return <p>{error ?? 'Loading song...'}</p>;
-  }
+  const toggleAssetNotes = (assetId: string) => {
+    setOpenAssetNotes(prev => {
+      const next = new Set(prev);
+      next.has(assetId) ? next.delete(assetId) : next.add(assetId);
+      return next;
+    });
+  };
 
-  return (
-    <section className="workspace-grid">
-      <article className="panel panel-wide">
-        <div className="section-head">
-          <div>
-            <h2>{song.title}</h2>
-            <p>{song.key ?? 'Key pending'} | {song.bpm ?? '--'} BPM</p>
-          </div>
-          <span className="badge">{song.status}</span>
-        </div>
+  // ── Render helpers ────────────────────────────────────────────────────────
 
-        <form className="stack-form upload-form" onSubmit={uploadAsset}>
-          <input
-            value={assetName}
-            onChange={(event) => setAssetName(event.target.value)}
-            placeholder="Asset name (optional)"
+  const renderMetaTags = (asset: SongAsset) => {
+    const tags: string[] = [];
+    if (asset.duration) tags.push(asset.duration);
+    if (asset.sampleRateHz) tags.push(`${asset.sampleRateHz} Hz`);
+    if (asset.bitrateKbps) tags.push(`${asset.bitrateKbps} kbps`);
+    if (asset.channels) tags.push(asset.channels === 1 ? 'Mono' : asset.channels === 2 ? 'Stereo' : `${asset.channels}ch`);
+    if (asset.codec) tags.push(asset.codec);
+    if (asset.container) tags.push(asset.container);
+    const size = fmtBytes(asset.fileSizeBytes);
+    if (size) tags.push(size);
+    if (!tags.length) tags.push(fmtType(asset.type));
+    return tags;
+  };
+
+  const renderVersionedCard = (composedKey: string, group: { groupKey: string; versions: SongAsset[] }) => {
+    const selectedId = selectedVersionByGroup[composedKey] || group.versions[0].id;
+    const asset = group.versions.find(v => v.id === selectedId) || group.versions[0];
+    const notesOpen = openAssetNotes.has(asset.id);
+    const metaTags = renderMetaTags(asset);
+    const isImage = asset.mediaKind === 'other' && asset.type.startsWith('image/');
+
+    return (
+      <div className="asset-card" key={composedKey}>
+
+        {/* Video thumbnail */}
+        {asset.mediaKind === 'video' && asset.streamUrl && (
+          <VideoThumbnail
+            src={resolveApiUrl(asset.streamUrl)}
+            onClick={() => setActiveVideoAsset(asset)}
           />
-          <select
-            className="select-field"
-            value={assetCategory}
-            onChange={(event) => setAssetCategory(event.target.value as AssetCategory)}
-          >
-            {categoryOrder.map((category) => (
-              <option key={category} value={category}>{category}</option>
-            ))}
-          </select>
-          <input
-            value={assetVersionGroup}
-            onChange={(event) => setAssetVersionGroup(event.target.value)}
-            placeholder="Version group (optional, e.g. chorus-vocal-main)"
-          />
+        )}
 
-          <div className="file-picker-row">
-            <label className="button button-ghost file-picker-label" htmlFor="asset-upload-input">
-              Choose file
-            </label>
-            <span className="file-picker-name">{selectedFile?.name ?? 'No file selected'}</span>
-            <input
-              id="asset-upload-input"
-              ref={fileInputRef}
-              className="file-picker-hidden"
-              type="file"
-              onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
-              required
+        {/* Image preview */}
+        {isImage && asset.streamUrl && (
+          <div className="asset-img-preview">
+            <img
+              src={resolveApiUrl(asset.streamUrl)}
+              alt={asset.name}
+              className="asset-img"
+              loading="lazy"
             />
           </div>
+        )}
 
-          <button className="button" type="submit">Upload file</button>
-        </form>
-
-        <div className="song-sections">
-          {groupedSections.map((section) => (
-            <article className="asset-section" key={section.category}>
-              <h3>{section.category}</h3>
-
-              {section.groups.length ? (
-                <div className="asset-section-grid">
-                  {section.groups.map((group) => {
-                    const composedKey = `${section.category}::${group.groupKey}`;
-                    const selectedId = selectedVersionByGroup[composedKey] || group.versions[0].id;
-                    const selectedVersion = group.versions.find((asset) => asset.id === selectedId) || group.versions[0];
-
-                    return (
-                      <div className="asset-card" key={composedKey}>
-                        <div className="asset-card__head">
-                          <strong>{selectedVersion.name}</strong>
-                          <span className="badge">v{selectedVersion.versionNumber}</span>
-                        </div>
-
-                        <div className="asset-version-controls">
-                          <label>History</label>
-                          <select
-                            className="select-field"
-                            value={selectedVersion.id}
-                            onChange={(event) =>
-                              setSelectedVersionByGroup((current) => ({ ...current, [composedKey]: event.target.value }))
-                            }
-                          >
-                            {group.versions.map((version) => (
-                              <option key={version.id} value={version.id}>
-                                v{version.versionNumber} - {new Date(version.createdAt).toLocaleString()}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <p>{prettifyAssetType(selectedVersion)} - {selectedVersion.duration ?? 'Unknown duration'}</p>
-
-                        {(selectedVersion.sampleRateHz ||
-                          selectedVersion.bitrateKbps ||
-                          selectedVersion.channels ||
-                          selectedVersion.codec ||
-                          selectedVersion.container ||
-                          selectedVersion.fileSizeBytes) ? (
-                          <div className="asset-metadata">
-                            {selectedVersion.sampleRateHz ? <span>{selectedVersion.sampleRateHz} Hz</span> : null}
-                            {selectedVersion.bitrateKbps ? <span>{selectedVersion.bitrateKbps} kbps</span> : null}
-                            {selectedVersion.channels ? <span>{selectedVersion.channels} ch</span> : null}
-                            {selectedVersion.codec ? <span>{selectedVersion.codec}</span> : null}
-                            {selectedVersion.container ? <span>{selectedVersion.container}</span> : null}
-                            {selectedVersion.fileSizeBytes ? <span>{formatFileSize(selectedVersion.fileSizeBytes)}</span> : null}
-                          </div>
-                        ) : null}
-
-                        <div className="asset-actions">
-                          {selectedVersion.streamUrl && selectedVersion.mediaKind !== 'other' ? (
-                            selectedVersion.mediaKind === 'audio' ? (
-                              <button
-                                className="button button-ghost"
-                                type="button"
-                                onClick={() =>
-                                  setActiveAudioAssetId((current) =>
-                                    current === selectedVersion.id ? null : selectedVersion.id
-                                  )
-                                }
-                              >
-                                {activeAudioAssetId === selectedVersion.id ? 'Hide player' : 'Play'}
-                              </button>
-                            ) : (
-                              <button
-                                className="button button-ghost"
-                                type="button"
-                                onClick={() => setActiveVideoAsset(selectedVersion)}
-                              >
-                                Play
-                              </button>
-                            )
-                          ) : null}
-
-                          {selectedVersion.downloadUrl ? (
-                            <a href={resolveApiUrl(selectedVersion.downloadUrl)} target="_blank" rel="noreferrer">
-                              Download
-                            </a>
-                          ) : null}
-
-                          <button className="button button-ghost" type="button" onClick={() => removeAsset(selectedVersion)}>
-                            Remove
-                          </button>
-                        </div>
-
-                        {selectedVersion.mediaKind === 'audio' &&
-                        selectedVersion.streamUrl &&
-                        activeAudioAssetId === selectedVersion.id ? (
-                          <audio
-                            src={resolveApiUrl(selectedVersion.streamUrl)}
-                            controls
-                            autoPlay
-                            preload="metadata"
-                            crossOrigin="use-credentials"
-                            className="media-element media-inline"
-                            onError={handlePlaybackError}
-                          />
-                        ) : null}
-
-                        <div className="asset-notes">
-                          <h4>File Notes</h4>
-                          <div className="stack-form">
-                            <textarea
-                              value={assetNoteDrafts[selectedVersion.id] || ''}
-                              onChange={(event) =>
-                                setAssetNoteDrafts((current) => ({
-                                  ...current,
-                                  [selectedVersion.id]: event.target.value
-                                }))
-                              }
-                              placeholder="Notes for this version only"
-                            />
-                            <button className="button button-ghost" type="button" onClick={() => addAssetNote(selectedVersion)}>
-                              Add file note
-                            </button>
-                          </div>
-
-                          <ul className="stack-list">
-                            {selectedVersion.notes.map((note) => (
-                              <li key={note.id}>
-                                <strong>{note.author}</strong>
-                                <p>{note.body}</p>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="section-empty">No files in this section yet.</p>
+        {/* Header */}
+        <div className="asset-card__head">
+          <div className="asset-card__title-row">
+            <span className="asset-card__name">{asset.name}</span>
+            <div className="asset-card__badges">
+              <span className="badge badge-default">v{asset.versionNumber}</span>
+              {group.versions.length > 1 && (
+                <span className="badge badge-default">{group.versions.length} versions</span>
               )}
-            </article>
-          ))}
+            </div>
+          </div>
         </div>
-      </article>
 
-      <article className="panel">
-        <h3>Song Notes</h3>
-        <form className="stack-form" onSubmit={createNote}>
-          <textarea
-            value={noteBody}
-            onChange={(event) => setNoteBody(event.target.value)}
-            placeholder="Leave creative notes, mix changes, or vocal direction"
-            required
-          />
-          <button className="button" type="submit">Add note</button>
-        </form>
-        <ul className="stack-list">
-          {song.notes.map((note) => (
-            <li key={note.id}>
-              <strong>{note.author}</strong>
-              <p>{note.body}</p>
-            </li>
+        {/* Waveform player for audio */}
+        {asset.mediaKind === 'audio' && asset.streamUrl && (
+          <WaveformPlayer src={resolveApiUrl(asset.streamUrl)} />
+        )}
+
+        {/* Meta tags */}
+        <div className="asset-metadata">
+          {metaTags.map(tag => (
+            <span key={tag} className="asset-meta-tag">{tag}</span>
           ))}
-        </ul>
-      </article>
+          <span className="asset-meta-tag asset-meta-tag--time" title={fmtAbsolute(asset.createdAt)}>
+            {timeAgo(asset.createdAt)}
+          </span>
+        </div>
 
-      <article className="panel">
-        <h3>Tasks</h3>
-        <form className="stack-form" onSubmit={createTask}>
-          <input
-            value={taskTitle}
-            onChange={(event) => setTaskTitle(event.target.value)}
-            placeholder="New task"
-            required
-          />
-          <button className="button" type="submit">Add task</button>
-        </form>
-        {error ? <p className="form-error">{error}</p> : null}
-        <ul className="stack-list">
-          {song.tasks.map((task) => (
-            <li key={task.id}>
-              <strong>{task.title}</strong>
-              <p>{task.assignee ?? 'Unassigned'} - {task.status}</p>
-              <select
-                className="select-field"
-                value={task.status}
-                onChange={(event) => updateTaskStatus(task.id, event.target.value as SongTaskStatus)}
+        {/* Version history */}
+        {group.versions.length > 1 && (
+          <div className="asset-history">
+            <span className="asset-history__label">Version</span>
+            <select
+              className="select"
+              value={asset.id}
+              onChange={e => setSelectedVersionByGroup(cur => ({ ...cur, [composedKey]: e.target.value }))}
+            >
+              {group.versions.map(v => (
+                <option key={v.id} value={v.id}>
+                  v{v.versionNumber} — {new Date(v.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="asset-actions">
+          {asset.mediaKind === 'video' && asset.streamUrl && (
+            <button className="btn btn-ghost btn-sm" type="button" onClick={() => setActiveVideoAsset(asset)}>
+              Play video
+            </button>
+          )}
+          {asset.downloadUrl && (
+            <a className="asset-download-link" href={resolveApiUrl(asset.downloadUrl)} target="_blank" rel="noreferrer">
+              Download
+            </a>
+          )}
+          <button className="btn btn-danger btn-sm" type="button" onClick={() => removeAsset(asset)}>
+            Remove
+          </button>
+          <button
+            className={`btn btn-ghost btn-sm asset-notes-toggle${notesOpen ? ' active' : ''}`}
+            type="button"
+            onClick={() => toggleAssetNotes(asset.id)}
+          >
+            Notes{asset.notes.length > 0 ? ` (${asset.notes.length})` : ''}
+          </button>
+        </div>
+
+        {/* Collapsible notes */}
+        {notesOpen && (
+          <div className="asset-notes-area">
+            <div className="form-stack">
+              <textarea
+                className="textarea"
+                value={assetNoteDrafts[asset.id] ?? ''}
+                onChange={e => setAssetNoteDrafts(d => ({ ...d, [asset.id]: e.target.value }))}
+                placeholder="Notes for this version..."
+                style={{ minHeight: '60px' }}
+              />
+              <button
+                className="btn btn-ghost btn-sm"
+                type="button"
+                style={{ alignSelf: 'flex-start' }}
+                onClick={() => addAssetNote(asset)}
               >
-                <option value="Open">Open</option>
-                <option value="In Review">In Review</option>
-                <option value="Done">Done</option>
-              </select>
-            </li>
-          ))}
-        </ul>
-      </article>
+                Add note
+              </button>
+            </div>
+            {asset.notes.length > 0 && (
+              <ul className="note-list">
+                {asset.notes.map(note => (
+                  <li key={note.id} className="note-item">
+                    <div className="note-item__meta">
+                      <span className="note-item__author">{note.author}</span>
+                      <time className="note-item__time" dateTime={note.createdAt} title={fmtAbsolute(note.createdAt)}>
+                        {timeAgo(note.createdAt)}
+                      </time>
+                    </div>
+                    <p className="note-item__body">{note.body}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
-      {activeVideoAsset && activeVideoAssetUrl ? (
-        <div className="media-modal" role="dialog" aria-modal="true">
+  // ── Loading / error ───────────────────────────────────────────────────────
+
+  if (!song) {
+    return <p style={{ color: 'var(--text-2)', padding: '12px 0' }}>{error ?? 'Loading song...'}</p>;
+  }
+
+  // ── Main render ───────────────────────────────────────────────────────────
+
+  return (
+    <>
+      <Breadcrumb items={[
+        { label: 'Projects', href: '/' },
+        { label: projectTitle ?? 'Project', href: projectId ? `/projects/${projectId}` : undefined },
+        { label: song.title },
+      ]} />
+
+      <section className="workspace">
+
+      {/* ── Main column ──────────────────────────────────────────────── */}
+      <div className="workspace-main">
+
+        {/* Song header */}
+        <div className="song-header">
+          <div>
+            <h2>{song.title}</h2>
+
+            {/* Key / BPM — view mode */}
+            {!editingMeta && (
+              <div className="song-meta">
+                {song.key && <span className="song-meta__item">{song.key}</span>}
+                {song.bpm && <span className="song-meta__item">{song.bpm} BPM</span>}
+                {!song.key && !song.bpm && (
+                  <span className="song-meta__item song-meta__item--muted">No key/BPM</span>
+                )}
+                <button
+                  className="song-meta__edit-btn"
+                  type="button"
+                  onClick={startEditMeta}
+                  aria-label="Edit key and BPM"
+                >
+                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+                    <path d="M7.5 1.5l2 2L3 10H1V8L7.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              </div>
+            )}
+
+            {/* Key / BPM — edit mode */}
+            {editingMeta && (
+              <div className="song-meta-edit">
+                <input
+                  className="input song-meta-edit__input"
+                  value={editKey}
+                  onChange={e => setEditKey(e.target.value)}
+                  placeholder="Key (e.g. Am, F#)"
+                  aria-label="Key"
+                />
+                <input
+                  className="input song-meta-edit__input"
+                  type="number"
+                  min={40}
+                  max={400}
+                  value={editBpm}
+                  onChange={e => setEditBpm(e.target.value)}
+                  placeholder="BPM"
+                  aria-label="BPM"
+                />
+                <button className="btn btn-primary btn-sm" type="button" onClick={saveMeta}>Save</button>
+                <button className="btn btn-ghost btn-sm" type="button" onClick={() => setEditingMeta(false)}>Cancel</button>
+              </div>
+            )}
+          </div>
+          <span className="badge badge-default">{song.status}</span>
+        </div>
+
+        {/* Upload form — collapsible */}
+        <div className="upload-section">
+          <button
+            className={`upload-toggle${uploadOpen ? ' upload-toggle--open' : ''}`}
+            type="button"
+            onClick={() => setUploadOpen(o => !o)}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+              <path d="M5 1V9M1 5H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            Upload file
+            <svg className="upload-toggle__chevron" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+              <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+
+          {uploadOpen && (
+            <div className="card upload-form-card">
+              <form className="form-stack" onSubmit={uploadAsset}>
+                <div className="form-row">
+                  <input className="input" value={assetName} onChange={e => setAssetName(e.target.value)} placeholder="Asset name (optional)" />
+                  <select className="select" value={assetCategory} onChange={e => setAssetCategory(e.target.value as AssetCategory)}>
+                    {CATEGORY_ORDER.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                  </select>
+                  <input className="input" value={assetVersionGroup} onChange={e => setAssetVersionGroup(e.target.value)} placeholder="Version group (optional)" />
+                </div>
+                <div className="file-picker-row">
+                  <label className="btn btn-ghost btn-sm file-picker-label" htmlFor="asset-file-input">Choose file</label>
+                  <span className="file-picker-name">{selectedFile?.name ?? 'No file selected'}</span>
+                  <input
+                    id="asset-file-input"
+                    ref={fileInputRef}
+                    className="file-picker-hidden"
+                    type="file"
+                    onChange={e => setSelectedFile(e.target.files?.[0] ?? null)}
+                    required
+                  />
+                  <button className="btn btn-primary btn-sm" type="submit" style={{ marginLeft: 'auto' }}>Upload</button>
+                </div>
+                {error && <p className="form-error">{error}</p>}
+              </form>
+            </div>
+          )}
+        </div>
+
+        {/* Asset sections */}
+        <div className="asset-sections">
+          {CATEGORY_ORDER.map(category => {
+            if (category === 'Social Media Content') {
+              if (!smcAssets.length) return null;
+              return (
+                <div key="Social Media Content" className="asset-section">
+                  <p className="asset-section__label">
+                    Social Media Content
+                    <span className="asset-section__count">{smcAssets.length}</span>
+                  </p>
+                  <div className="smc-list">
+                    {smcAssets.map(asset => {
+                      const isImg = asset.mediaKind === 'other' && asset.type.startsWith('image/');
+                      return (
+                        <div key={asset.id} className="smc-row">
+                          {/* Thumbnail / icon */}
+                          {asset.mediaKind === 'video' && asset.streamUrl ? (
+                            <div className="smc-row__thumb">
+                              <VideoThumbnail
+                                src={resolveApiUrl(asset.streamUrl)}
+                                onClick={() => setActiveVideoAsset(asset)}
+                                aspect={16 / 9}
+                              />
+                            </div>
+                          ) : isImg && asset.streamUrl ? (
+                            <div className="smc-row__thumb smc-row__thumb--img">
+                              <img src={resolveApiUrl(asset.streamUrl)} alt={asset.name} loading="lazy" />
+                            </div>
+                          ) : (
+                            <div className="smc-row__icon">
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                <rect x="1" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.2"/>
+                              </svg>
+                            </div>
+                          )}
+
+                          <div className="smc-row__info">
+                            <span className="smc-row__name">{asset.name}</span>
+                            <div className="smc-row__meta">
+                              {asset.duration && <span>{asset.duration}</span>}
+                              {fmtBytes(asset.fileSizeBytes) && <span>{fmtBytes(asset.fileSizeBytes)}</span>}
+                              <time title={fmtAbsolute(asset.createdAt)}>{timeAgo(asset.createdAt)}</time>
+                            </div>
+                          </div>
+
+                          <div className="smc-row__actions">
+                            {asset.mediaKind === 'video' && asset.streamUrl && (
+                              <button className="btn btn-ghost btn-sm" type="button" onClick={() => setActiveVideoAsset(asset)}>Play</button>
+                            )}
+                            {asset.downloadUrl && (
+                              <a className="btn btn-ghost btn-sm" href={resolveApiUrl(asset.downloadUrl)} target="_blank" rel="noreferrer">Download</a>
+                            )}
+                            <button className="btn btn-danger btn-sm" type="button" onClick={() => removeAsset(asset)}>Remove</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            }
+
+            const section = groupedSections.find(s => s.category === category);
+            if (!section?.groups.length) return null;
+            return (
+              <div key={category} className="asset-section">
+                <p className="asset-section__label">
+                  {category}
+                  <span className="asset-section__count">{section.groups.length}</span>
+                </p>
+                <div className="asset-grid">
+                  {section.groups.map(group => renderVersionedCard(`${category}::${group.groupKey}`, group))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Sidebar ────────────────────────────────────────────────────── */}
+      <div className="sidebar">
+
+        <div className="card sidebar-panel">
+          <p className="sidebar-panel__title">Song Notes</p>
+          <form className="form-stack" onSubmit={createNote}>
+            <textarea
+              className="textarea"
+              value={noteBody}
+              onChange={e => setNoteBody(e.target.value)}
+              placeholder="Creative notes, mix changes, direction..."
+              required
+            />
+            <button className="btn btn-ghost btn-sm" type="submit" style={{ alignSelf: 'flex-start' }}>Add note</button>
+          </form>
+          {song.notes.length > 0 && (
+            <ul className="note-list sidebar-note-list">
+              {song.notes.map(note => (
+                <li key={note.id} className="note-item">
+                  <div className="note-item__meta">
+                    <span className="note-item__author">{note.author}</span>
+                    <time className="note-item__time" dateTime={note.createdAt} title={fmtAbsolute(note.createdAt)}>
+                      {timeAgo(note.createdAt)}
+                    </time>
+                  </div>
+                  <p className="note-item__body">{note.body}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="card sidebar-panel">
+          <p className="sidebar-panel__title">Tasks</p>
+          <form className="form-stack" onSubmit={createTask}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input className="input" value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="New task" required />
+              <button className="btn btn-ghost btn-sm" type="submit" style={{ flexShrink: 0 }}>Add</button>
+            </div>
+          </form>
+          {song.tasks.length > 0 && (
+            <ul className="task-list">
+              {song.tasks.map(task => (
+                <li key={task.id} className={`task-item task-item--${task.status.toLowerCase().replace(' ', '-')}`}>
+                  <div className="task-item__row">
+                    <span className="task-item__title">{task.title}</span>
+                    <select
+                      className="select task-item__select"
+                      value={task.status}
+                      onChange={e => updateTaskStatus(task.id, e.target.value as SongTaskStatus)}
+                    >
+                      <option value="Open">Open</option>
+                      <option value="In Review">In Review</option>
+                      <option value="Done">Done</option>
+                    </select>
+                  </div>
+                  {task.assignee && <span className="task-item__assignee">{task.assignee}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="card sidebar-panel lyrics-panel">
+          <div className="lyrics-panel__header">
+            <p className="sidebar-panel__title">Lyrics</p>
+            <button className="btn btn-primary btn-sm" type="button" onClick={saveLyrics} disabled={savingLyrics}>
+              {savingLyrics ? 'Saving...' : 'Save lyrics'}
+            </button>
+          </div>
+          <p className="lyrics-panel__hint">
+            Use section headers like Genius: [Intro], [Verse 1], [Pre-Chorus], [Chorus], [Bridge], [Outro].
+          </p>
+          <textarea
+            className="textarea lyrics-textarea"
+            value={lyricsDraft}
+            onChange={(e) => setLyricsDraft(e.target.value)}
+            placeholder={'[Verse 1]\nYour lyrics here...\n\n[Chorus]\nYour chorus here...'}
+          />
+        </div>
+      </div>
+
+      {/* ── Video modal — no auto-fullscreen, user controls it ─────────── */}
+      {activeVideoAsset && activeVideoUrl && (
+        <div
+          className="media-modal"
+          role="dialog"
+          aria-modal="true"
+          onClick={e => { if (e.target === e.currentTarget) setActiveVideoAsset(null); }}
+        >
           <div className="media-modal__panel">
-            <div className="section-head">
+            <div className="media-modal__header">
               <div>
                 <h3>{activeVideoAsset.name}</h3>
-                <p>{prettifyAssetType(activeVideoAsset)}</p>
+                <p>{fmtType(activeVideoAsset.type)} · {activeVideoAsset.duration ?? 'Unknown duration'}</p>
               </div>
-              <button className="button button-ghost" type="button" onClick={() => setActiveVideoAsset(null)}>
+              <button className="btn btn-ghost btn-sm" type="button" onClick={() => setActiveVideoAsset(null)}>
                 Close
               </button>
             </div>
-
-            {activeVideoAsset.mediaKind === 'video' ? (
-              <video
-                ref={videoRef}
-                src={activeVideoAssetUrl}
-                controls
-                autoPlay
-                preload="metadata"
-                crossOrigin="use-credentials"
-                className="media-element"
-                onError={handlePlaybackError}
-              />
-            ) : (
-              <p>This file type cannot be previewed in-app yet. Use download instead.</p>
-            )}
+            <video
+              key={activeVideoUrl}
+              src={activeVideoUrl}
+              controls
+              autoPlay
+              preload="metadata"
+              crossOrigin="use-credentials"
+              className="media-element"
+              onError={() => setError('Unable to stream this file.')}
+            />
           </div>
         </div>
-      ) : null}
+      )}
     </section>
+    </>
   );
 }

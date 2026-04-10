@@ -5,7 +5,10 @@ import { z } from 'zod';
 loadEnv({ path: resolve(import.meta.dirname, '../../../.env') });
 
 const envSchema = z.object({
-  DATABASE_URL: z.string().min(1),
+  DATABASE_URL: z.string().optional(),
+  DATABASE_PRIVATE_URL: z.string().optional(),
+  POSTGRES_URL: z.string().optional(),
+  POSTGRES_PRISMA_URL: z.string().optional(),
   PORT: z.string().default('4000'),
   CLIENT_ORIGIN: z.string().default('http://localhost:5173'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -28,8 +31,27 @@ if (!result.success) {
   process.exit(1);
 }
 
+const resolvedDatabaseUrl =
+  result.data.DATABASE_URL?.trim() ||
+  result.data.DATABASE_PRIVATE_URL?.trim() ||
+  result.data.POSTGRES_URL?.trim() ||
+  result.data.POSTGRES_PRISMA_URL?.trim() ||
+  '';
+
+if (!resolvedDatabaseUrl) {
+  console.error(
+    'Invalid environment configuration',
+    {
+      DATABASE_URL: [
+        'Required. Set one of DATABASE_URL, DATABASE_PRIVATE_URL, POSTGRES_URL, or POSTGRES_PRISMA_URL.'
+      ]
+    }
+  );
+  process.exit(1);
+}
+
 export const env = {
-  databaseUrl: result.data.DATABASE_URL,
+  databaseUrl: resolvedDatabaseUrl,
   port: Number(result.data.PORT),
   clientOrigin: result.data.CLIENT_ORIGIN,
   nodeEnv: result.data.NODE_ENV,

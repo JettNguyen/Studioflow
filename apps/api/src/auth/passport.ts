@@ -4,7 +4,13 @@ import { prisma } from '../lib/prisma.js';
 import { env } from '../config.js';
 import { mapAuthUser } from '../utils/mappers.js';
 
-const googleScopes = ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/drive.file'];
+const googleScopes = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive.readonly'
+];
 
 if (env.googleEnabled) {
   passport.use(

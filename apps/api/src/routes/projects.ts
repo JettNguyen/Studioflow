@@ -110,9 +110,10 @@ projectRouter.get('/:projectId', async (req, res) => {
           assets: true,
           tasks: true
         },
-        orderBy: {
-          createdAt: 'asc'
-        }
+        orderBy: [
+          { position: 'asc' },
+          { createdAt: 'asc' }
+        ]
       }
     }
   });
@@ -120,6 +121,73 @@ projectRouter.get('/:projectId', async (req, res) => {
   if (!project) {
     return res.status(404).json({ message: 'Project not found' });
   }
+
+  res.json(mapProjectDetails(project));
+});
+
+// Update project fields (e.g. title, description, genre)
+projectRouter.patch('/:projectId', async (req, res) => {
+  const body = req.body as Partial<{ title: string; description: string; genre: string }>;
+
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId: req.params.projectId, userId: req.user!.id }
+  });
+
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  const updates: Record<string, unknown> = {};
+  if (typeof body.title === 'string' && body.title.trim().length > 0) updates.title = body.title.trim();
+  if (typeof body.description === 'string') updates.description = body.description;
+  if (typeof body.genre === 'string' && body.genre.trim().length > 0) updates.genre = body.genre.trim();
+
+  if (Object.keys(updates).length === 0) return res.status(400).json({ message: 'No valid fields to update' });
+
+  const project = await prisma.project.update({
+    where: { id: req.params.projectId },
+    data: updates,
+    include: {
+      songs: {
+        include: { assets: true, tasks: true },
+        orderBy: [ { position: 'asc' }, { createdAt: 'asc' } ]
+      }
+    }
+  });
+
+  res.json(mapProjectDetails(project));
+});
+
+// Reorder songs within a project. Expects { order: string[] } with song IDs in desired order.
+projectRouter.post('/:projectId/songs/reorder', async (req, res) => {
+  const payload = req.body as { order?: string[] } | undefined;
+  if (!payload?.order || !Array.isArray(payload.order)) {
+    return res.status(400).json({ message: 'Invalid payload' });
+  }
+
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId: req.params.projectId, userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  // Fetch current songs for the project to validate
+  const songs = await prisma.song.findMany({ where: { projectId: req.params.projectId }, select: { id: true } });
+  const idsSet = new Set(songs.map((s) => s.id));
+
+  if (payload.order.length !== songs.length || payload.order.some((id) => !idsSet.has(id))) {
+    return res.status(400).json({ message: 'Order must include all songs from the project' });
+  }
+
+  // Apply positions in a transaction
+  const updates = payload.order.map((id, idx) => prisma.song.update({ where: { id }, data: { position: idx } }));
+
+  await prisma.$transaction(updates);
+
+  // Return updated project
+  const project = await prisma.project.findUnique({
+    where: { id: req.params.projectId },
+    include: { songs: { include: { assets: true, tasks: true }, orderBy: [ { position: 'asc' }, { createdAt: 'asc' } ] } }
+  });
+
+  if (!project) return res.status(404).json({ message: 'Project not found after reorder' });
 
   res.json(mapProjectDetails(project));
 });
