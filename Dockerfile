@@ -12,6 +12,6 @@ RUN npm ci
 
 RUN npm run build --workspace @studioflow/shared && npm run build --workspace @studioflow/api
 
-EXPOSE 4000
+EXPOSE 8080
 
-CMD ["sh", "-c", "for i in 1 2 3 4 5; do node_modules/.bin/prisma migrate deploy --schema=apps/api/prisma/schema.prisma && break; echo \"Prisma migrate deploy failed (attempt $i). Retrying...\"; sleep 3; done; node apps/api/dist/server.js"]
+CMD ["sh", "-c", "echo \"Booting Studioflow API on PORT=${PORT:-4000}\"; for i in 1 2 3 4 5; do node_modules/.bin/prisma migrate deploy --schema=apps/api/prisma/schema.prisma && break; echo \"Prisma migrate deploy failed (attempt $i). Retrying...\"; sleep 3; done; node apps/api/dist/server.js"]
