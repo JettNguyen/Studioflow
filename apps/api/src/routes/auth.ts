@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import type { Request, Response } from 'express';
 import type { LoginRequest, SignupRequest } from '@studioflow/shared';
 import { passport } from '../auth/passport.js';
 import { env } from '../config.js';
@@ -10,6 +11,18 @@ import { getGrantedScopes } from '../utils/drive.js';
 import { mapAuthUser } from '../utils/mappers.js';
 
 export const authRouter = Router();
+
+function establishSession(req: Request, res: Response, userId: string, onSuccess: () => void) {
+  req.session.userId = userId;
+
+  req.session.save((error) => {
+    if (error) {
+      return res.status(500).json({ message: 'Unable to persist login session' });
+    }
+
+    return onSuccess();
+  });
+}
 
 const signupSchema = z.object({
   email: z.string().email(),
@@ -54,9 +67,9 @@ authRouter.post('/signup', async (req, res) => {
     }
   });
 
-  req.session.userId = user.id;
-
-  res.status(201).json({ user: mapAuthUser(user) });
+  return establishSession(req, res, user.id, () => {
+    res.status(201).json({ user: mapAuthUser(user) });
+  });
 });
 
 authRouter.post('/login', async (req, res) => {
@@ -85,9 +98,9 @@ authRouter.post('/login', async (req, res) => {
     return res.status(401).json({ message: 'Invalid email or password' });
   }
 
-  req.session.userId = user.id;
-
-  res.json({ user: mapAuthUser(user) });
+  return establishSession(req, res, user.id, () => {
+    res.json({ user: mapAuthUser(user) });
+  });
 });
 
 authRouter.post('/logout', (req, res) => {
@@ -132,8 +145,9 @@ authRouter.get('/google/callback', (req, res, next) => {
       return res.redirect(`${env.clientOrigin}/login?error=google-auth-failed`);
     }
 
-    req.session.userId = user.id;
-    return res.redirect(`${env.clientOrigin}/`);
+    return establishSession(req, res, user.id, () => {
+      res.redirect(`${env.clientOrigin}/`);
+    });
   })(req, res, next);
 });
 
