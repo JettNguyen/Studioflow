@@ -1,13 +1,18 @@
 import type { CreateSongRequest, ProjectDetails, SongWorkspace } from '@studioflow/shared';
 import { useEffect, useState, type DragEvent, type FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faPencil, faCheck, faXmark, faTrash } from '@fortawesome/free-solid-svg-icons';
 import { apiRequest } from '../lib/api';
 import { Breadcrumb } from '../components/Breadcrumb';
 import './ProjectPage.css';
 
 export function ProjectPage() {
+  const navigate = useNavigate();
   const { projectId } = useParams();
   const [project, setProject] = useState<ProjectDetails | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState('');
   const [editingProjectTitle, setEditingProjectTitle] = useState(false);
   const [projectTitleInput, setProjectTitleInput] = useState('');
@@ -27,7 +32,8 @@ export function ProjectPage() {
       .then(setProject)
       .catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : 'Unable to load project');
-      });
+      })
+      .finally(() => setLoading(false));
   }, [projectId]);
 
   useEffect(() => {
@@ -56,6 +62,19 @@ export function ProjectPage() {
     }
   };
 
+  const toggleProjectReleased = async () => {
+    if (!projectId || !project) return;
+    try {
+      const updated = await apiRequest<ProjectDetails>(`/projects/${projectId}`, {
+        method: 'PATCH',
+        body: { released: !project.released }
+      });
+      setProject(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to update project');
+    }
+  };
+
   const startEditSongTitle = (songId: string, current: string) => {
     setEditingSongId(songId);
     setEditingSongTitle(current);
@@ -64,11 +83,9 @@ export function ProjectPage() {
   const saveSongTitle = async (songId: string) => {
     try {
       await apiRequest(`/songs/${songId}`, { method: 'PATCH', body: { title: editingSongTitle } });
-      // refresh project to get updated song list
-      if (projectId) {
-        const updated = await apiRequest<ProjectDetails>(`/projects/${projectId}`);
-        setProject(updated);
-      }
+      const newTitle = editingSongTitle;
+      setProject(prev => prev ? { ...prev, songs: prev.songs.map(s => s.id === songId ? { ...s, title: newTitle } : s) } : prev);
+      setPreviewSongs(prev => prev.map(s => s.id === songId ? { ...s, title: newTitle } : s));
       setEditingSongId(null);
       setEditingSongTitle('');
     } catch (e) {
@@ -138,12 +155,25 @@ export function ProjectPage() {
     setDragOverSongId(null);
   };
 
+  const deleteSong = async (songId: string, songTitle: string) => {
+    if (!window.confirm(`Delete "${songTitle}"? This will remove all its assets, notes, and tasks permanently.`)) return;
+    try {
+      await apiRequest(`/songs/${songId}`, { method: 'DELETE' });
+      setPreviewSongs(prev => prev.filter(s => s.id !== songId));
+      setProject(prev => prev ? { ...prev, songs: prev.songs.filter(s => s.id !== songId) } : prev);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to delete song');
+    }
+  };
+
   const createSong = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!projectId) {
       return;
     }
+
+    setCreating(true);
 
     try {
       const song = await apiRequest<SongWorkspace>(`/songs/project/${projectId}`, {
@@ -152,14 +182,34 @@ export function ProjectPage() {
       });
 
       setTitle('');
-      window.location.href = `/projects/${projectId}/songs/${song.id}`;
+      navigate(`/projects/${projectId}/songs/${song.id}`);
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'Unable to create song');
+      setCreating(false);
     }
   };
 
+  if (loading) {
+    return (
+      <section>
+        <div className="skeleton skeleton--breadcrumb" />
+        <div className="skeleton skeleton--title" style={{ marginBottom: 20 }} />
+        <ul className="song-list">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <li key={i} className="song-list-item">
+              <div className="song-row song-row--skeleton">
+                <div className="skeleton skeleton--line" />
+                <div className="skeleton skeleton--badge" />
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  }
+
   if (!project) {
-    return <p style={{ color: 'var(--text-2)', padding: '12px 0' }}>{error ?? 'Loading...'}</p>;
+    return <p style={{ color: 'var(--text-2)', padding: '12px 0' }}>{error ?? 'Unable to load project.'}</p>;
   }
 
   return (
@@ -174,18 +224,34 @@ export function ProjectPage() {
           {!editingProjectTitle ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <h2 style={{ margin: 0 }}>{project.title}</h2>
-              <button className="btn btn-ghost" onClick={startEditProjectTitle} aria-label="Edit project title">Edit</button>
+              <button className="btn btn-ghost btn-icon" onClick={startEditProjectTitle} aria-label="Edit project title">
+                <FontAwesomeIcon icon={faPencil} />
+              </button>
             </div>
           ) : (
             <div style={{ display: 'flex', gap: 8 }}>
               <input className="input" value={projectTitleInput} onChange={(e) => setProjectTitleInput(e.target.value)} />
-              <button className="btn btn-primary" onClick={saveProjectTitle}>Save</button>
-              <button className="btn" onClick={() => setEditingProjectTitle(false)}>Cancel</button>
+              <button className="btn btn-primary btn-icon" onClick={saveProjectTitle} aria-label="Save">
+                <FontAwesomeIcon icon={faCheck} />
+              </button>
+              <button className="btn btn-ghost btn-icon" onClick={() => setEditingProjectTitle(false)} aria-label="Cancel">
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
             </div>
           )}
           {project.description && <p>{project.description}</p>}
         </div>
         <div className="page-header__aside project-drive-status">
+          <button
+            className={`btn btn-ghost btn-sm ${project.released ? 'released' : ''}`}
+            type="button"
+            onClick={toggleProjectReleased}
+            aria-pressed={project.released}
+            title={project.released ? 'Mark as unreleased' : 'Mark as released'}
+          >
+            {project.released ? 'Released' : 'Unreleased'}
+          </button>
+
           <span className={`badge ${project.driveSyncStatus === 'Healthy' ? 'badge-green' : 'badge-default'}`}>
             Drive: {project.driveSyncStatus}
           </span>
@@ -205,7 +271,9 @@ export function ProjectPage() {
               placeholder="Song title"
               required
             />
-            <button className="btn btn-primary" type="submit">Add song</button>
+            <button className="btn btn-primary" type="submit" disabled={creating || title.trim() === ''}>
+              {creating ? 'Adding…' : 'Add song'}
+            </button>
           </form>
           {error && <p className="form-error" style={{ marginTop: '10px' }}>{error}</p>}
         </div>
@@ -236,10 +304,10 @@ export function ProjectPage() {
               >
                 <div className="song-row__main">
                   <h3 style={{ margin: 0 }}>{song.title}</h3>
-                  <span className="song-row__status">{song.status}</span>
                 </div>
                 <div className="song-row__stats">
                   <span className="song-row__stat">{song.assetCount} {song.assetCount === 1 ? 'asset' : 'assets'}</span>
+                  <span className={`badge ${song.released ? 'badge-green' : 'badge-default'}`}>{song.released ? 'Released' : 'Unreleased'}</span>
                   {song.taskOpenCount > 0 && (
                     <span className="badge badge-amber">{song.taskOpenCount} open</span>
                   )}
@@ -247,12 +315,21 @@ export function ProjectPage() {
               </Link>
 
               {!editingSongId || editingSongId !== song.id ? (
-                <button className="btn btn-ghost" onClick={() => startEditSongTitle(song.id, song.title)}>Edit</button>
+                <button className="btn btn-ghost btn-icon" onClick={() => startEditSongTitle(song.id, song.title)} aria-label={`Edit ${song.title}`}>
+                  <FontAwesomeIcon icon={faPencil} />
+                </button>
               ) : (
-                <span style={{ display: 'flex', gap: 6 }}>
+                <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input className="input" value={editingSongTitle} onChange={(e) => setEditingSongTitle(e.target.value)} />
-                  <button className="btn btn-primary" onClick={() => saveSongTitle(song.id)}>Save</button>
-                  <button className="btn" onClick={() => setEditingSongId(null)}>Cancel</button>
+                  <button className="btn btn-primary btn-icon" onClick={() => saveSongTitle(song.id)} aria-label="Save">
+                    <FontAwesomeIcon icon={faCheck} />
+                  </button>
+                  <button className="btn btn-ghost btn-icon" onClick={() => setEditingSongId(null)} aria-label="Cancel">
+                    <FontAwesomeIcon icon={faXmark} />
+                  </button>
+                  <button className="btn btn-danger btn-icon" onClick={() => deleteSong(song.id, song.title)} aria-label={`Delete ${song.title}`}>
+                    <FontAwesomeIcon icon={faTrash} />
+                  </button>
                 </span>
               )}
             </li>

@@ -1,3 +1,4 @@
+import compression from 'compression';
 import cors from 'cors';
 import express from 'express';
 import session from 'express-session';
@@ -24,7 +25,12 @@ export function createApp() {
     app.set('trust proxy', 1);
   }
 
-  app.use(helmet());
+  app.use(compression());
+  app.use(helmet({
+    // The frontend is on a different origin, so resources served by this API
+    // (images, avatars, cover art) must be embeddable cross-origin.
+    crossOriginResourcePolicy: { policy: 'cross-origin' }
+  }));
   app.use(
     cors({
       origin: env.clientOrigin,

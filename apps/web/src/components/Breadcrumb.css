@@ -10,7 +10,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-2);
   text-decoration: none;
@@ -18,8 +18,8 @@
   border: 1px solid var(--border-mid);
   border-radius: var(--r-2);
   flex-shrink: 0;
-  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
-  min-height: 30px;
+  transition: color 0.2s, border-color 0.2s, background-color 0.2s;
+  min-height: 35px;
 }
 
 .bc-back:hover {
@@ -74,7 +74,7 @@
 .bc-trail a {
   color: var(--text-2);
   text-decoration: none;
-  transition: color 0.15s;
+  transition: color 0.2s;
   white-space: nowrap;
 }
 

@@ -1,28 +1,11 @@
-/* DriveSyncPage now redirects to /profile. These styles are kept as a
-   safety net in case the page is ever restored, or referenced elsewhere. */
+/* DriveSyncPage now redirects to /profile — see App.tsx.
+   Retained only to keep the file importable if the page is ever restored.
+   Icon styles live in ProfilePage.css. */
 
 .drive-status-card {
   display: flex;
   align-items: flex-start;
   gap: 15px;
-}
-
-.drive-status-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--r-3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.drive-status-icon--connected {
-  background: var(--green-subtle);
-}
-
-.drive-status-icon--disconnected {
-  background: var(--surface-hover);
 }
 
 .drive-status-body h3 {

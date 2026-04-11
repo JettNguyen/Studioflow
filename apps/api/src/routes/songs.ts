@@ -17,6 +17,7 @@ import { createDriveFolder, uploadDriveFile } from '../utils/drive.js';
 import { mapSongWorkspace } from '../utils/mappers.js';
 
 export const songRouter = Router();
+const paramToString = (v: string | string[] | undefined) => Array.isArray(v) ? v[0] : (v ?? '');
 const createSongSchema = z.object({
   title: z.string().min(1).max(120),
   status: z.string().max(60).optional(),
@@ -129,7 +130,7 @@ songRouter.post('/project/:projectId', async (req, res) => {
   const membership = await prisma.projectMembership.findFirst({
     where: {
       userId: req.user!.id,
-      projectId: req.params.projectId
+      projectId: paramToString(req.params.projectId)
     },
     include: {
       project: true
@@ -140,29 +141,9 @@ songRouter.post('/project/:projectId', async (req, res) => {
     return res.status(404).json({ message: 'Project not found' });
   }
 
-  let driveFolderId: string | null = null;
-
-  if (membership.project.driveFolderId) {
-    const googleAccount = await prisma.oAuthAccount.findFirst({
-      where: { userId: req.user!.id, provider: 'google' }
-    });
-
-    if (googleAccount) {
-      try {
-        driveFolderId = await createDriveFolder(
-          googleAccount,
-          parsed.data.title,
-          membership.project.driveFolderId
-        );
-      } catch {
-        driveFolderId = null;
-      }
-    }
-  }
-
   // Determine position: append to end by finding current max position
   const maxPos = await prisma.song.findFirst({
-    where: { projectId: req.params.projectId },
+    where: { projectId: paramToString(req.params.projectId) },
     orderBy: { position: 'desc' }
   });
 
@@ -170,13 +151,13 @@ songRouter.post('/project/:projectId', async (req, res) => {
 
   const song = await prisma.song.create({
     data: {
-      projectId: req.params.projectId,
+      projectId: paramToString(req.params.projectId),
       title: parsed.data.title,
       status: parsed.data.status ?? 'Draft',
       position: nextPosition,
       keySignature: parsed.data.key,
       bpm: parsed.data.bpm,
-      driveFolderId
+      driveFolderId: null
     },
     include: {
       assets: {
@@ -200,7 +181,22 @@ songRouter.post('/project/:projectId', async (req, res) => {
     }
   });
 
-  res.status(201).json(mapSongWorkspace(song));
+  res.status(201).json(mapSongWorkspace(song, membership.project.title));
+
+  // Fire-and-forget: create Drive folder after responding so the client isn't blocked
+  if (membership.project.driveFolderId) {
+    prisma.oAuthAccount.findFirst({ where: { userId: req.user!.id, provider: 'google' } })
+      .then((googleAccount) => {
+        if (!googleAccount) return;
+        return createDriveFolder(googleAccount, parsed.data.title, membership.project.driveFolderId!)
+          .then((folderId) => {
+            if (folderId) {
+              return prisma.song.update({ where: { id: song.id }, data: { driveFolderId: folderId } });
+            }
+          });
+      })
+      .catch(() => { /* will be repaired on next sync-drive-all */ });
+  }
 });
 
 songRouter.get('/:songId', async (req, res) => {
@@ -216,6 +212,7 @@ songRouter.get('/:songId', async (req, res) => {
       }
     },
     include: {
+      project: { select: { title: true } },
       assets: {
         include: {
           notes: {
@@ -251,7 +248,7 @@ songRouter.get('/:songId', async (req, res) => {
     return res.status(404).json({ message: 'Song not found' });
   }
 
-  res.json(mapSongWorkspace(song));
+  res.json(mapSongWorkspace(song, song.project.title));
 });
 
 const updateSongSchema = z.object({
@@ -259,6 +256,7 @@ const updateSongSchema = z.object({
   lyrics: z.string().max(100000).nullable().optional(),
   key: z.string().max(30).nullable().optional(),
   bpm: z.number().int().positive().max(400).nullable().optional(),
+  released: z.boolean().optional()
 });
 
 songRouter.patch('/:songId', async (req, res) => {
@@ -290,7 +288,44 @@ songRouter.patch('/:songId', async (req, res) => {
     }
   });
 
-  res.json(mapSongWorkspace(song));
+  // Handle fields not yet reflected in the generated Prisma client via raw SQL.
+  const rawUpdates: string[] = [];
+  let releasedValue: boolean = Boolean((song as any).released);
+  if (parsed.data.released !== undefined) {
+    rawUpdates.push(`"released" = ${parsed.data.released ? 'TRUE' : 'FALSE'}`);
+    releasedValue = parsed.data.released;
+  }
+  // Track manual overrides: setting a value marks it manual; clearing it resets to auto.
+  if (parsed.data.key !== undefined) {
+    rawUpdates.push(`"keyManuallySet" = ${parsed.data.key !== null ? 'TRUE' : 'FALSE'}`);
+  }
+  if (parsed.data.bpm !== undefined) {
+    rawUpdates.push(`"bpmManuallySet" = ${parsed.data.bpm !== null ? 'TRUE' : 'FALSE'}`);
+  }
+  if (rawUpdates.length > 0) {
+    try {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "Song" SET ${rawUpdates.join(', ')} WHERE "id" = '${req.params.songId}'`
+      );
+    } catch { /* non-fatal */ }
+  }
+
+  // Build response from the update result — no extra round-trip needed.
+  // Merge the raw-SQL-applied `released` value we just set.
+  res.json(mapSongWorkspace(Object.assign({}, song, { released: releasedValue })));
+});
+
+songRouter.delete('/:songId', async (req, res) => {
+  const membership = await prisma.projectMembership.findFirst({
+    where: {
+      userId: req.user!.id,
+      project: { songs: { some: { id: req.params.songId } } }
+    }
+  });
+  if (!membership) return res.status(404).json({ message: 'Song not found' });
+
+  await prisma.song.delete({ where: { id: req.params.songId } });
+  res.status(204).send();
 });
 
 songRouter.post('/:songId/notes', async (req, res) => {
@@ -556,8 +591,9 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
     }
   }
 
-  try {
-    if (env.s3Enabled && req.file.path) {
+  // First, attempt S3 upload if enabled. If this fails, abort and return 500.
+  if (env.s3Enabled && req.file.path) {
+    try {
       const s3Key = buildS3ObjectKey({
         userId: req.user!.id,
         songId,
@@ -569,23 +605,32 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
         objectKey: s3Key,
         contentType: req.file.mimetype
       });
+    } catch (err) {
+      await unlink(localFilePath).catch(() => undefined);
+      return res.status(500).json({ message: 'Failed to upload file to storage backend' });
     }
+  }
 
-    if (song.driveFolderId && googleAccount) {
+  // Drive upload is secondary: attempt it but do not let failures block the request.
+  if (song.driveFolderId && googleAccount) {
+    try {
       driveFileId = await uploadDriveFile(googleAccount, {
         localFilePath,
         name: `${inputAssetName} (v${nextVersionNumber})`,
         mimeType: req.file.mimetype,
         parentFolderId: song.driveFolderId
       });
+    } catch (driveErr) {
+      // Drive failures should not fail the API response — log and continue.
+      // Keep driveFileId as null and proceed.
+      console.error('Drive upload failed for asset', { songId, file: req.file.originalname, err: driveErr });
+      driveFileId = null;
     }
+  }
 
-    if (env.s3Enabled) {
-      await unlink(localFilePath).catch(() => undefined);
-    }
-  } catch {
+  // If we uploaded to S3, the local file can be removed. For local-only storage, keep the file.
+  if (env.s3Enabled) {
     await unlink(localFilePath).catch(() => undefined);
-    return res.status(500).json({ message: 'Failed to upload file to storage backend' });
   }
 
   const asset = await prisma.asset.create({
@@ -608,14 +653,35 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
     }
   });
 
-  if (prismaCategory === 'SongAudio' && (inferredKey || inferredBpm)) {
-    await prisma.song.update({
-      where: { id: songId },
-      data: {
-        keySignature: inferredKey ?? song.keySignature,
-        bpm: inferredBpm ?? song.bpm
+  if (prismaCategory === 'SongAudio') {
+    // Prefer tag-extracted values; fall back to client-side detected values sent in form body.
+    const finalKey = inferredKey
+      || ((req.body.detectedKey as string | undefined)?.trim() || null);
+    const finalBpm = inferredBpm
+      || (() => {
+        const v = parseInt((req.body.detectedBpm as string | undefined) ?? '', 10);
+        return Number.isFinite(v) && v > 0 ? v : null;
+      })();
+
+    if (finalKey || finalBpm) {
+      // Read manual-override flags — columns added via db push, use raw SQL to avoid
+      // Prisma client regeneration requirement while the dev server is running.
+      const flags = await prisma.$queryRawUnsafe<Array<{ keyManuallySet: boolean; bpmManuallySet: boolean }>>(
+        `SELECT "keyManuallySet", "bpmManuallySet" FROM "Song" WHERE "id" = $1`, songId
+      );
+      const keyManuallySet = flags[0]?.keyManuallySet ?? false;
+      const bpmManuallySet = flags[0]?.bpmManuallySet ?? false;
+
+      const updateCols: string[] = [];
+      if (finalKey && !keyManuallySet) updateCols.push(`"keySignature" = '${finalKey.replace(/'/g, "''")}'`);
+      if (finalBpm && !bpmManuallySet) updateCols.push(`"bpm" = ${finalBpm}`);
+
+      if (updateCols.length > 0) {
+        await prisma.$executeRawUnsafe(
+          `UPDATE "Song" SET ${updateCols.join(', ')} WHERE "id" = '${songId}'`
+        );
       }
-    });
+    }
   }
 
   const mediaKind = asset.type.startsWith('video/')

@@ -10,6 +10,7 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   loginWithGoogle: () => void;
   refreshSession: () => Promise<void>;
+  setUser: (user: AuthUser | null) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -67,7 +68,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signup,
         logout,
         loginWithGoogle,
-        refreshSession
+        refreshSession,
+        setUser
       }}
     >
       {children}

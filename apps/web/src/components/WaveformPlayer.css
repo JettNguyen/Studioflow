@@ -20,7 +20,7 @@
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.12s, transform 0.1s;
+  transition: background-color 0.2s, transform 0.2s;
   padding: 0;
   padding-left: 1px; /* optical centering for play triangle */
 }

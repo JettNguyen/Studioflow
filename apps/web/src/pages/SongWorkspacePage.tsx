@@ -10,7 +10,8 @@ import type {
 } from '@studioflow/shared';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useParams } from 'react-router-dom';
-import { apiRequest, apiUpload, resolveApiUrl } from '../lib/api';
+import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
+import { analyzeAudioFile, type AudioFeatures } from '../lib/audioAnalysis';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { WaveformPlayer } from '../components/WaveformPlayer';
 import { VideoThumbnail } from '../components/VideoThumbnail';
@@ -80,16 +81,19 @@ async function readFileDuration(file: File): Promise<string | null> {
 export function SongWorkspacePage() {
   const { projectId, songId } = useParams();
   const [song, setSong] = useState<SongWorkspaceWithLyrics | null>(null);
-  const [projectTitle, setProjectTitle] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Upload form
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [assetName, setAssetName] = useState('');
   const [assetCategory, setAssetCategory] = useState<AssetCategory>('Song Audio');
   const [assetVersionGroup, setAssetVersionGroup] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [detectedFeatures, setDetectedFeatures] = useState<AudioFeatures | null>(null);
 
   // Key/BPM inline edit
   const [editingMeta, setEditingMeta] = useState(false);
@@ -162,6 +166,22 @@ export function SongWorkspacePage() {
     });
   }, [groupedSections]);
 
+  // ── Audio analysis ────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!selectedFile || assetCategory !== 'Song Audio') {
+      setDetectedFeatures(null);
+      return;
+    }
+    let cancelled = false;
+    setAnalyzing(true);
+    setDetectedFeatures(null);
+    analyzeAudioFile(selectedFile).then(features => {
+      if (!cancelled) { setDetectedFeatures(features); setAnalyzing(false); }
+    });
+    return () => { cancelled = true; setAnalyzing(false); };
+  }, [selectedFile, assetCategory]);
+
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -171,12 +191,6 @@ export function SongWorkspacePage() {
       .catch(e => setError(e instanceof Error ? e.message : 'Unable to load song'));
   }, [songId]);
 
-  useEffect(() => {
-    if (!projectId) return;
-    apiRequest<{ id: string; title: string }>(`/projects/${projectId}`)
-      .then(p => setProjectTitle(p.title))
-      .catch(() => {/* breadcrumb label just stays null */});
-  }, [projectId]);
 
   const refreshSong = async () => {
     if (!songId) return;
@@ -191,6 +205,9 @@ export function SongWorkspacePage() {
     e.preventDefault();
     if (!songId || !selectedFile) { setError('Please choose a file.'); return; }
     try {
+      setUploading(true);
+      setUploadProgress(0);
+      setError(null);
       const fd = new FormData();
       fd.append('file', selectedFile);
       fd.append('category', assetCategory);
@@ -198,13 +215,19 @@ export function SongWorkspacePage() {
       if (assetVersionGroup.trim()) fd.append('versionGroup', assetVersionGroup.trim());
       const dur = await readFileDuration(selectedFile);
       if (dur) fd.append('duration', dur);
-      await apiUpload<SongAsset>(`/songs/${songId}/assets`, fd, { method: 'POST' });
-      setAssetName(''); setAssetVersionGroup(''); setSelectedFile(null);
+      if (assetCategory === 'Song Audio' && detectedFeatures) {
+        if (detectedFeatures.key) fd.append('detectedKey', detectedFeatures.key);
+        if (detectedFeatures.bpm !== null) fd.append('detectedBpm', String(detectedFeatures.bpm));
+      }
+      await apiUploadWithProgress<SongAsset>(`/songs/${songId}/assets`, fd, setUploadProgress);
+      setAssetName(''); setAssetVersionGroup(''); setSelectedFile(null); setDetectedFeatures(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       await refreshSong();
-      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -243,6 +266,19 @@ export function SongWorkspacePage() {
       setError(err instanceof Error ? err.message : 'Failed to save lyrics');
     } finally {
       setSavingLyrics(false);
+    }
+  };
+
+  const toggleSongReleased = async () => {
+    if (!song || !songId) return;
+    try {
+      const updated = await apiRequest<SongWorkspace>(`/songs/${songId}`, {
+        method: 'PATCH',
+        body: { released: !song.released }
+      });
+      setSong(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update release state');
     }
   };
 
@@ -476,7 +512,21 @@ export function SongWorkspacePage() {
   // ── Loading / error ───────────────────────────────────────────────────────
 
   if (!song) {
-    return <p style={{ color: 'var(--text-2)', padding: '12px 0' }}>{error ?? 'Loading song...'}</p>;
+    if (error) return <p style={{ color: 'var(--text-2)', padding: '12px 0' }}>{error}</p>;
+    return (
+      <section className="workspace">
+        <div className="workspace-main">
+          <div className="skeleton skeleton--breadcrumb" />
+          <div className="skeleton skeleton--title" style={{ marginBottom: 8 }} />
+          <div className="skeleton skeleton--line skeleton--line-short" style={{ marginBottom: 20 }} />
+          <div className="skeleton" style={{ height: 40, marginBottom: 12 }} />
+          <div className="skeleton" style={{ height: 120 }} />
+        </div>
+        <div className="sidebar">
+          <div className="skeleton" style={{ height: 160, borderRadius: 'var(--r-3)' }} />
+        </div>
+      </section>
+    );
   }
 
   // ── Main render ───────────────────────────────────────────────────────────
@@ -485,7 +535,7 @@ export function SongWorkspacePage() {
     <>
       <Breadcrumb items={[
         { label: 'Projects', href: '/' },
-        { label: projectTitle ?? 'Project', href: projectId ? `/projects/${projectId}` : undefined },
+        { label: song.projectTitle || 'Project', href: projectId ? `/projects/${projectId}` : undefined },
         { label: song.title },
       ]} />
 
@@ -545,7 +595,18 @@ export function SongWorkspacePage() {
               </div>
             )}
           </div>
-          <span className="badge badge-default">{song.status}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              className={`btn btn-ghost btn-sm ${song.released ? 'released' : ''}`}
+              type="button"
+              onClick={toggleSongReleased}
+              aria-pressed={song.released}
+              title={song.released ? 'Mark as unreleased' : 'Mark as released'}
+            >
+              {song.released ? 'Released' : 'Unreleased'}
+            </button>
+            <span className="badge badge-default">{song.status}</span>
+          </div>
         </div>
 
         {/* Upload form — collapsible */}
@@ -585,8 +646,29 @@ export function SongWorkspacePage() {
                     onChange={e => setSelectedFile(e.target.files?.[0] ?? null)}
                     required
                   />
-                  <button className="btn btn-primary btn-sm" type="submit" style={{ marginLeft: 'auto' }}>Upload</button>
+                  <button className="btn btn-primary btn-sm" type="submit" disabled={uploading || !selectedFile} style={{ marginLeft: 'auto' }}>
+                    {uploading ? 'Uploading…' : 'Upload'}
+                  </button>
                 </div>
+                {assetCategory === 'Song Audio' && selectedFile && (
+                  <div className="analysis-status">
+                    {analyzing ? (
+                      <span className="analysis-status__scanning">Analyzing audio…</span>
+                    ) : detectedFeatures ? (
+                      <span className="analysis-status__result">
+                        Detected:{' '}
+                        {[detectedFeatures.key, detectedFeatures.bpm != null ? `${detectedFeatures.bpm} BPM` : null]
+                          .filter(Boolean).join(' · ') || 'No key/BPM detected'}
+                      </span>
+                    ) : null}
+                  </div>
+                )}
+                {uploading && uploadProgress !== null && (
+                  <div className="upload-progress">
+                    <div className="upload-progress__bar" style={{ width: `${uploadProgress}%` }} />
+                    <span className="upload-progress__label">{uploadProgress}%</span>
+                  </div>
+                )}
                 {error && <p className="form-error">{error}</p>}
               </form>
             </div>

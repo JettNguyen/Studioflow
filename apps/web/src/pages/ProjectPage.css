@@ -35,7 +35,7 @@
 }
 
 .song-list-item {
-  transition: transform 0.12s ease;
+  transition: transform 0.2s ease;
 }
 
 .song-row:hover {
@@ -56,10 +56,6 @@
   text-overflow: ellipsis;
 }
 
-.song-row__status {
-  font-size: 12px;
-  color: var(--text-2);
-}
 
 .song-row__stats {
   display: flex;
@@ -72,6 +68,12 @@
   font-size: 12px;
   color: var(--text-2);
   white-space: nowrap;
+}
+
+.song-row--skeleton {
+  pointer-events: none;
+  gap: 15px;
+  padding: 15px 20px;
 }
 
 /* Drag handle */

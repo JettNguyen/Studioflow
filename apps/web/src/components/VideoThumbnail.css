@@ -32,7 +32,7 @@
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.35);
-  transition: background 0.15s;
+  transition: background-color 0.2s;
 }
 
 .vthumb__overlay--ready {
@@ -45,7 +45,7 @@
 
 .vthumb__play {
   transform: scale(0.9);
-  transition: transform 0.15s;
+  transition: transform 0.2s;
 }
 
 .vthumb--clickable:hover .vthumb__play {

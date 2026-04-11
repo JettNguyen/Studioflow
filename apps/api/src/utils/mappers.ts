@@ -71,40 +71,63 @@ function mapAssetCategory(category: string): AssetCategory {
 export function mapAuthUser(user: User & { oauthAccounts?: OAuthAccount[] }): AuthUser {
   const googleAccount = user.oauthAccounts?.find((account) => account.provider === 'google');
 
+  // Custom upload takes priority; fall back to Google profile photo.
+  // Include updatedAt as a version param so the browser always fetches
+  // a fresh image after each upload instead of serving a stale cached copy.
+  const avatarUrl = user.avatarStorageKey
+    ? `/api/auth/me/avatar?v=${user.updatedAt.getTime()}`
+    : (user.avatarUrl ?? null);
+
   return {
     id: user.id,
     email: user.email,
     name: user.name,
-    avatarUrl: user.avatarUrl ?? null,
+    avatarUrl,
     hasPassword: Boolean(user.passwordHash),
     googleDriveConnected: Boolean(googleAccount)
   };
 }
 
 export function mapProjectSummary(
-  project: Project & { memberships: ProjectMembership[]; songs: Song[] }
+  project: {
+    id: string;
+    title: string;
+    description: string;
+    genre: string;
+    coverImageKey: string | null;
+    driveSyncStatus: string;
+    _count: { songs: number; memberships: number };
+    [k: string]: unknown;
+  }
 ): ProjectSummary {
-  return {
+  const out = {
     id: project.id,
     title: project.title,
     description: project.description,
     genre: project.genre,
-    songCount: project.songs.length,
-    collaboratorCount: project.memberships.length,
-    driveSyncStatus: mapSyncStatus(project.driveSyncStatus)
+    released: Boolean(project.released),
+    songCount: project._count.songs,
+    collaboratorCount: project._count.memberships,
+    driveSyncStatus: mapSyncStatus(project.driveSyncStatus),
+    coverImageUrl: project.coverImageKey ? `/api/projects/${project.id}/cover` : null
   };
+
+  return out as unknown as ProjectSummary;
 }
 
 export function mapSongSummary(
   song: Song & { assets: Array<{ id: string }>; tasks: Task[] }
 ): SongSummary {
-  return {
+  const out = {
     id: song.id,
     title: song.title,
+    released: Boolean((song as any).released),
     status: song.status,
     assetCount: song.assets.length,
     taskOpenCount: song.tasks.filter((task) => task.status !== 'Done').length
   };
+
+  return out as unknown as SongSummary;
 }
 
 export function mapProjectDetails(
@@ -112,15 +135,19 @@ export function mapProjectDetails(
     songs: Array<Song & { assets: Array<{ id: string }>; tasks: Task[] }>;
   }
 ): ProjectDetails {
-  return {
+  const out = {
     id: project.id,
     title: project.title,
     description: project.description,
     genre: project.genre,
+    released: Boolean((project as any).released),
     driveSyncStatus: mapSyncStatus(project.driveSyncStatus),
     driveFolderId: project.driveFolderId,
+    coverImageUrl: project.coverImageKey ? `/api/projects/${project.id}/cover` : null,
     songs: project.songs.map(mapSongSummary)
   };
+
+  return out as unknown as ProjectDetails;
 }
 
 export function mapSongWorkspace(
@@ -144,12 +171,15 @@ export function mapSongWorkspace(
     }>;
     notes: Array<{ id: string; body: string; createdAt: Date; author: User }>;
     tasks: Array<{ id: string; title: string; status: string; assignee: User | null }>;
-  }
+  },
+  projectTitle = ''
 ): SongWorkspace {
-  return {
+  const out = {
     id: song.id,
     projectId: song.projectId,
+    projectTitle,
     title: song.title,
+    released: Boolean((song as any).released),
     status: song.status,
     lyrics: song.lyrics ?? null,
     key: song.keySignature ?? null,
@@ -198,4 +228,6 @@ export function mapSongWorkspace(
       })
     )
   };
+
+  return out as unknown as SongWorkspace;
 }

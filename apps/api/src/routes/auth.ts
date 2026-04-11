@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { createReadStream, existsSync } from 'node:fs';
+import { unlink } from 'node:fs/promises';
 import { z } from 'zod';
 import type { Request, Response } from 'express';
 import type { LoginRequest, SignupRequest } from '@studioflow/shared';
@@ -7,6 +9,8 @@ import { env } from '../config.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { resolveStoredFilePath, uploadImage } from '../storage/localStorage.js';
+import { buildS3ObjectKey, deleteS3Object, getS3Object, isS3StorageKey, uploadFileToS3 } from '../storage/s3Storage.js';
 import { getGrantedScopes } from '../utils/drive.js';
 import { mapAuthUser } from '../utils/mappers.js';
 
@@ -149,6 +153,94 @@ authRouter.get('/google/callback', (req, res, next) => {
       res.redirect(`${env.clientOrigin}/`);
     });
   })(req, res, next);
+});
+
+authRouter.get('/me/avatar', requireAuth, async (req, res) => {
+  const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+  if (!user?.avatarStorageKey) return res.status(404).json({ message: 'No avatar' });
+
+  if (isS3StorageKey(user.avatarStorageKey)) {
+    try {
+      const obj = await getS3Object(user.avatarStorageKey);
+      res.setHeader('Content-Type', obj.ContentType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'private, max-age=86400');
+      (obj.Body as NodeJS.ReadableStream).pipe(res);
+    } catch {
+      return res.status(404).json({ message: 'Avatar not found in storage' });
+    }
+    return;
+  }
+
+  const fullPath = resolveStoredFilePath(user.avatarStorageKey);
+  if (!existsSync(fullPath)) return res.status(404).json({ message: 'Avatar not found' });
+
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  createReadStream(fullPath).pipe(res);
+});
+
+authRouter.post('/me/avatar', requireAuth, uploadImage.single('image'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'No image file provided' });
+
+  const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+  const localFilePath = resolveStoredFilePath(req.file.filename);
+  let storageKey = req.file.filename;
+
+  try {
+    if (env.s3Enabled) {
+      const s3Key = buildS3ObjectKey({ userId: req.user!.id, songId: 'avatar', fileName: req.file.originalname });
+      storageKey = await uploadFileToS3({ localFilePath, objectKey: s3Key, contentType: req.file.mimetype });
+      await unlink(localFilePath).catch(() => undefined);
+    }
+  } catch {
+    await unlink(localFilePath).catch(() => undefined);
+    return res.status(500).json({ message: 'Failed to store avatar' });
+  }
+
+  // Delete old custom avatar
+  if (user?.avatarStorageKey) {
+    try {
+      if (isS3StorageKey(user.avatarStorageKey)) {
+        await deleteS3Object(user.avatarStorageKey);
+      } else {
+        const prev = resolveStoredFilePath(user.avatarStorageKey);
+        if (existsSync(prev)) await unlink(prev).catch(() => undefined);
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: req.user!.id },
+    data: { avatarStorageKey: storageKey },
+    include: { oauthAccounts: { where: { provider: 'google' } } }
+  });
+
+  res.json({ user: mapAuthUser(updated) });
+});
+
+authRouter.delete('/me/avatar', requireAuth, async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.user!.id },
+    include: { oauthAccounts: { where: { provider: 'google' } } }
+  });
+  if (!user?.avatarStorageKey) return res.json({ user: mapAuthUser(user!) });
+
+  try {
+    if (isS3StorageKey(user.avatarStorageKey)) {
+      await deleteS3Object(user.avatarStorageKey);
+    } else {
+      const fullPath = resolveStoredFilePath(user.avatarStorageKey);
+      if (existsSync(fullPath)) await unlink(fullPath).catch(() => undefined);
+    }
+  } catch { /* non-fatal */ }
+
+  const updated = await prisma.user.update({
+    where: { id: req.user!.id },
+    data: { avatarStorageKey: null },
+    include: { oauthAccounts: { where: { provider: 'google' } } }
+  });
+
+  res.json({ user: mapAuthUser(updated) });
 });
 
 authRouter.get('/drive-status', requireAuth, async (req, res) => {

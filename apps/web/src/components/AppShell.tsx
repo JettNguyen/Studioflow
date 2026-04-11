@@ -1,10 +1,22 @@
+import { useEffect } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { apiRequest, resolveApiUrl } from '../lib/api';
 import { InstallPrompt } from './InstallPrompt';
 import './AppShell.css';
 
 export function AppShell() {
   const { user } = useAuth();
+
+  // Silently repair any broken Drive folders on every authenticated load.
+  // Only runs if the user has a Google Drive connection.
+  useEffect(() => {
+    if (user?.googleDriveConnected) {
+      apiRequest('/projects/sync-drive-all', { method: 'POST' }).catch(() => {
+        // Non-blocking — sync failures are surfaced on the Profile page
+      });
+    }
+  }, [user?.googleDriveConnected]);
 
   const initials = user?.name
     ? user.name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
@@ -49,7 +61,9 @@ export function AppShell() {
             className={({ isActive }) => `topbar__profile-btn${isActive ? ' active' : ''}`}
             aria-label="Profile"
           >
-            {initials}
+            {user?.avatarUrl ? (
+              <img src={resolveApiUrl(user.avatarUrl)} alt="" className="topbar__profile-img" />
+            ) : initials}
           </NavLink>
         </div>
 

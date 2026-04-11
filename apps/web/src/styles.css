@@ -199,6 +199,16 @@ input, select, textarea {
   font-size: 12px;
 }
 
+.btn-icon {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
 .btn-full {
   width: 100%;
 }
@@ -330,6 +340,13 @@ select option {
   border-color: rgba(46, 207, 94, 0.25);
 }
 
+/* Released state button */
+.btn.released {
+  background: rgba(46, 207, 94, 0.06);
+  color: var(--green);
+  border-color: rgba(46, 207, 94, 0.15);
+}
+
 .badge-amber {
   background: var(--amber-subtle);
   color: var(--amber);
@@ -360,60 +377,54 @@ select option {
 }
 
 /* ============================================================
-   MEDIA MODAL
+   PAGE SPINNER  (used as Suspense fallback on route transitions)
    ============================================================ */
-.media-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  background: rgba(0, 0, 0, 0.8);
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.page-spinner {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 15px;
-  backdrop-filter: blur(3px);
+  height: 120px;
 }
 
-.media-modal__panel {
-  width: min(100%, 840px);
-  max-height: 90dvh;
-  overflow-y: auto;
-  background: var(--surface-raised);
-  border: 1px solid var(--border-mid);
-  border-radius: var(--r-4);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-  box-shadow: var(--shadow-lg);
-}
-
-.media-modal__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.media-element {
-  max-height: 75dvh;
-  border-radius: var(--r-3);
-  display: block;
-}
-
-.media-inline {
-  margin-top: 5px;
+.page-spinner::after {
+  content: '';
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--surface-raised);
+  border-top-color: var(--text-2);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
 }
 
 /* ============================================================
-   CHIP GROUP
+   SKELETON LOADING
    ============================================================ */
-.chip-group {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-wrap: wrap;
+@keyframes skeleton-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
 }
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-raised) 25%,
+    rgba(255,255,255,0.05) 50%,
+    var(--surface-raised) 75%
+  );
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--r-2);
+}
+
+.skeleton--badge    { width: 60px;  height: 20px; }
+.skeleton--title    { width: 45%;   height: 24px; }
+.skeleton--line     { width: 100%;  height: 14px; }
+.skeleton--line-short { width: 60%; height: 14px; }
+.skeleton--breadcrumb { width: 180px; height: 14px; margin-bottom: 20px; }
 
 /* ============================================================
    EMPTY STATE

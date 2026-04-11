@@ -34,6 +34,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
 export async function apiUpload<T>(path: string, formData: FormData, options: Omit<RequestInit, 'body'> = {}) {
   const response = await fetch(`${apiBaseUrl}${path}`, {
+    method: 'POST',
     credentials: 'include',
     ...options,
     body: formData
@@ -46,6 +47,41 @@ export async function apiUpload<T>(path: string, formData: FormData, options: Om
   }
 
   return response.json() as Promise<T>;
+}
+
+export function apiUploadWithProgress<T>(
+  path: string,
+  formData: FormData,
+  onProgress: (pct: number) => void
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${apiBaseUrl}${path}`);
+    xhr.withCredentials = true;
+
+    xhr.upload.addEventListener('progress', e => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    });
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText) as T); }
+        catch { reject(new Error('Invalid response')); }
+      } else {
+        try {
+          const payload = JSON.parse(xhr.responseText);
+          reject(new Error(payload?.message || `Upload failed with status ${xhr.status}`));
+        } catch {
+          reject(new Error(`Upload failed with status ${xhr.status}`));
+        }
+      }
+    });
+
+    xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
+    xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+
+    xhr.send(formData);
+  });
 }
 
 export function resolveApiUrl(path: string) {

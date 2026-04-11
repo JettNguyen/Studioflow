@@ -35,14 +35,17 @@ export interface ProjectSummary {
   title: string;
   description: string;
   genre: string;
+  released: boolean;
   songCount: number;
   collaboratorCount: number;
   driveSyncStatus: ProjectSyncStatus;
+  coverImageUrl: string | null;
 }
 
 export interface SongSummary {
   id: string;
   title: string;
+  released: boolean;
   status: string;
   assetCount: number;
   taskOpenCount: number;
@@ -53,8 +56,10 @@ export interface ProjectDetails {
   title: string;
   description: string;
   genre: string;
+  released: boolean;
   driveSyncStatus: ProjectSyncStatus;
   driveFolderId: string | null;
+  coverImageUrl: string | null;
   songs: SongSummary[];
 }
 
@@ -103,7 +108,9 @@ export interface SongTask {
 export interface SongWorkspace {
   id: string;
   projectId: string;
+  projectTitle: string;
   title: string;
+  released: boolean;
   status: string;
   lyrics: string | null;
   key: string | null;
