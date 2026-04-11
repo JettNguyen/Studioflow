@@ -23,6 +23,11 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
   const [time, setTime] = useState(0);
   const [dur, setDur] = useState(0);
   const [volume, setVolume] = useState(1);
+  // Blob URL derived from the already-fetched audio data.
+  // The <audio> element uses this instead of the original src so it never needs
+  // to make a separate authenticated request — critical on iOS Safari where the
+  // audio element does not reliably send session cookies for media requests.
+  const [blobSrc, setBlobSrc] = useState<string | null>(null);
 
   const redraw = useCallback((progress: number) => {
     const canvas = canvasRef.current;
@@ -85,10 +90,12 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
     setStatus('loading');
     setPlaying(false);
     setTime(0);
+    setDur(0);
     progressRef.current = 0;
     bufferRef.current = null;
 
     const ctrl = new AbortController();
+    let createdBlobUrl: string | null = null;
 
     (async () => {
       try {
@@ -96,18 +103,45 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
         if (!res.ok) throw new Error('fetch');
         const ab = await res.arrayBuffer();
         if (ctrl.signal.aborted) return;
+
+        // Clone before decoding: decodeAudioData transfers (detaches) the
+        // ArrayBuffer, so we need a separate copy to create the Blob URL.
+        const abForBlob = ab.slice(0);
+        const contentType = res.headers.get('content-type') || 'audio/mpeg';
+
         const ac = new AudioContext();
         const buf = await ac.decodeAudioData(ab);
         void ac.close();
         if (ctrl.signal.aborted) return;
+
         bufferRef.current = buf;
+
+        // Duration is known from the decoded buffer — set it immediately so the
+        // timer display is correct even before the audio element fires loadedmetadata.
+        setDur(buf.duration);
+
+        // Build a Blob URL from the raw bytes so the <audio> element can play
+        // without making another authenticated network request. On iOS Safari
+        // (PWA and browser), the audio element does not reliably send session
+        // cookies for media src requests; using a local Blob URL avoids that
+        // entirely.
+        const blob = new Blob([abForBlob], { type: contentType });
+        createdBlobUrl = URL.createObjectURL(blob);
+        setBlobSrc(createdBlobUrl);
+
         setStatus('ready');
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setStatus('error');
       }
     })();
 
-    return () => ctrl.abort();
+    return () => {
+      ctrl.abort();
+      // Revoke the blob URL when src changes or the component unmounts so the
+      // browser can free the backing memory.
+      if (createdBlobUrl) URL.revokeObjectURL(createdBlobUrl);
+      setBlobSrc(null);
+    };
   }, [src]);
 
   // Redraw on resize once ready
@@ -198,7 +232,8 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
     <div className="wfp">
       <audio
         ref={audioRef}
-        src={src}
+        src={blobSrc ?? undefined}
+        preload="auto"
         onLoadedMetadata={e => setDur((e.target as HTMLAudioElement).duration)}
         onEnded={() => { setPlaying(false); progressRef.current = 0; setTime(0); redraw(0); }}
       />

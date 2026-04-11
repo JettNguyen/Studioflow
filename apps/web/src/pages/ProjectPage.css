@@ -32,6 +32,10 @@
   text-decoration: none;
   transition: border-color 0.2s, background-color 0.2s;
   gap: 10px;
+  /* Required so this flex child can shrink below its content's natural width,
+     which lets the inner h3 truncation (overflow: hidden + text-overflow: ellipsis)
+     actually fire when song titles are long. */
+  min-width: 0;
 }
 
 .song-list-item {

@@ -139,6 +139,11 @@
   .wfp-volume {
     gap: 0;
   }
+  
+  /* Hide the speaker icon on touch devices */
+  .wfp-volume__icon {
+    display: none;
+  }
 }
 
 /* ── Time display ── */
