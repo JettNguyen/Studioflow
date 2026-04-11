@@ -2,15 +2,15 @@ import { Router } from 'express';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { z } from 'zod';
+import { env } from '../config.js';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { resolveStoredFilePath } from '../storage/localStorage.js';
-import { deleteDriveFile } from '../utils/drive.js';
+import { deleteDriveFile, getDriveFileStream } from '../utils/drive.js';
 import {
   deleteS3Object,
-  getS3Object,
-  getS3ObjectWithRange,
-  headS3Object,
+  getS3ObjectWithLegacyFallback,
+  getS3ObjectWithRangeLegacyFallback,
   isS3StorageKey
 } from '../storage/s3Storage.js';
 
@@ -29,9 +29,7 @@ async function findAuthorizedAsset(assetId: string, userId: string) {
       song: {
         project: {
           memberships: {
-            some: {
-              userId
-            }
+            some: { userId }
           }
         }
       }
@@ -46,18 +44,19 @@ assetRouter.get('/:assetId/stream', async (req, res) => {
     return res.status(404).json({ message: 'Asset not found' });
   }
 
-  if (isS3StorageKey(asset.storageKey)) {
+  const range = typeof req.headers.range === 'string' ? req.headers.range : undefined;
+
+  // S3 path: handles both explicit s3: keys and legacy keys when S3 is enabled
+  if (isS3StorageKey(asset.storageKey) || env.s3Enabled) {
     try {
-      const range = typeof req.headers.range === 'string' ? req.headers.range : undefined;
-      const head = await headS3Object(asset.storageKey);
-      const object = await getS3ObjectWithRange(asset.storageKey, range);
+      const { object } = await getS3ObjectWithRangeLegacyFallback(asset.storageKey, range);
       const body = object.Body;
 
       if (!body || typeof (body as NodeJS.ReadableStream).pipe !== 'function') {
-        return res.status(404).json({ message: 'S3 object body not available' });
+        return res.status(404).json({ message: 'Asset not available in storage' });
       }
 
-      res.setHeader('Content-Type', object.ContentType || 'application/octet-stream');
+      res.setHeader('Content-Type', object.ContentType || asset.type || 'application/octet-stream');
       res.setHeader('Accept-Ranges', 'bytes');
 
       if (object.ContentRange) {
@@ -65,49 +64,79 @@ assetRouter.get('/:assetId/stream', async (req, res) => {
         res.setHeader('Content-Range', object.ContentRange);
       }
 
-      const contentLength = object.ContentLength ?? head.ContentLength;
-      if (typeof contentLength === 'number') {
-        res.setHeader('Content-Length', contentLength.toString());
+      // Only set Content-Length from the actual GET response — never from a separate HEAD
+      // call, which can cause ERR_CONTENT_LENGTH_MISMATCH when range sizes don't align.
+      if (typeof object.ContentLength === 'number') {
+        res.setHeader('Content-Length', object.ContentLength.toString());
       }
 
       (body as NodeJS.ReadableStream).pipe(res);
       return;
-    } catch {
-      return res.status(404).json({ message: 'Stored file not found in S3' });
+    } catch (err) {
+      if (isS3StorageKey(asset.storageKey)) {
+        console.error('[S3 stream error]', asset.storageKey, err);
+        return res.status(404).json({ message: 'Asset not found in storage' });
+      }
+      // Legacy (non-s3:) key: fall through to local / Drive
     }
   }
 
+  // Local file path
   const fullPath = resolveStoredFilePath(asset.storageKey);
-  if (!existsSync(fullPath)) {
-    return res.status(404).json({ message: 'Stored file not found on server' });
-  }
+  if (existsSync(fullPath)) {
+    const fileSize = statSync(fullPath).size;
 
-  const fileSize = statSync(fullPath).size;
-  const range = req.headers.range;
+    if (range) {
+      const [startRaw, endRaw] = range.replace('bytes=', '').split('-');
+      const start = Number.parseInt(startRaw, 10);
+      const end = endRaw ? Number.parseInt(endRaw, 10) : fileSize - 1;
 
-  if (range) {
-    const [startRaw, endRaw] = range.replace('bytes=', '').split('-');
-    const start = Number.parseInt(startRaw, 10);
-    const end = endRaw ? Number.parseInt(endRaw, 10) : fileSize - 1;
+      if (Number.isNaN(start) || Number.isNaN(end) || start > end || end >= fileSize) {
+        return res.status(416).end();
+      }
 
-    if (Number.isNaN(start) || Number.isNaN(end) || start > end || end >= fileSize) {
-      return res.status(416).end();
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Content-Length', (end - start + 1).toString());
+      res.setHeader('Content-Type', asset.type || 'application/octet-stream');
+      createReadStream(fullPath, { start, end }).pipe(res);
+      return;
     }
 
-    res.status(206);
-    res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
     res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Content-Length', (end - start + 1).toString());
+    res.setHeader('Content-Length', fileSize.toString());
     res.setHeader('Content-Type', asset.type || 'application/octet-stream');
-
-    createReadStream(fullPath, { start, end }).pipe(res);
+    createReadStream(fullPath).pipe(res);
     return;
   }
 
-  res.setHeader('Accept-Ranges', 'bytes');
-  res.setHeader('Content-Length', fileSize.toString());
-  res.setHeader('Content-Type', asset.type || 'application/octet-stream');
-  createReadStream(fullPath).pipe(res);
+  // Drive fallback
+  if (asset.driveFileId) {
+    try {
+      const googleAccount = await prisma.oAuthAccount.findFirst({
+        where: { userId: req.user!.id, provider: 'google' }
+      });
+
+      if (googleAccount) {
+        const driveObject = await getDriveFileStream(googleAccount, asset.driveFileId, range);
+        res.setHeader('Content-Type', driveObject.mimeType || asset.type || 'application/octet-stream');
+        res.setHeader('Accept-Ranges', 'bytes');
+
+        if (typeof driveObject.size === 'number' && Number.isFinite(driveObject.size)) {
+          res.setHeader('Content-Length', driveObject.size.toString());
+        }
+
+        driveObject.stream.pipe(res);
+        return;
+      }
+    } catch (err) {
+      console.error('[Drive stream error]', asset.driveFileId, err);
+    }
+  }
+
+  console.error('[Stream error] Asset not found in any location:', asset.storageKey);
+  return res.status(404).json({ message: 'Asset not found in any storage location' });
 });
 
 assetRouter.get('/:assetId/download', async (req, res) => {
@@ -117,35 +146,59 @@ assetRouter.get('/:assetId/download', async (req, res) => {
     return res.status(404).json({ message: 'Asset not found' });
   }
 
-  if (isS3StorageKey(asset.storageKey)) {
+  // S3 path
+  if (isS3StorageKey(asset.storageKey) || env.s3Enabled) {
     try {
-      const object = await getS3Object(asset.storageKey);
+      const { object } = await getS3ObjectWithLegacyFallback(asset.storageKey);
       const body = object.Body;
 
       if (!body || typeof (body as NodeJS.ReadableStream).pipe !== 'function') {
-        return res.status(404).json({ message: 'S3 object body not available' });
+        return res.status(404).json({ message: 'Asset not available in storage' });
       }
 
       res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
-      res.setHeader('Content-Type', object.ContentType || 'application/octet-stream');
-
+      res.setHeader('Content-Type', object.ContentType || asset.type || 'application/octet-stream');
       (body as NodeJS.ReadableStream).pipe(res);
       return;
-    } catch {
-      return res.status(404).json({ message: 'Stored file not found in S3' });
+    } catch (err) {
+      if (isS3StorageKey(asset.storageKey)) {
+        console.error('[S3 download error]', asset.storageKey, err);
+        return res.status(404).json({ message: 'Asset not found in storage' });
+      }
+      // Legacy key: fall through to local / Drive
     }
   }
 
+  // Local file path
   const fullPath = resolveStoredFilePath(asset.storageKey);
-
-  if (!existsSync(fullPath)) {
-    return res.status(404).json({ message: 'Stored file not found on server' });
+  if (existsSync(fullPath)) {
+    res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
+    res.setHeader('Content-Type', asset.type || 'application/octet-stream');
+    createReadStream(fullPath).pipe(res);
+    return;
   }
 
-  res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
-  res.setHeader('Content-Type', 'application/octet-stream');
+  // Drive fallback
+  if (asset.driveFileId) {
+    try {
+      const googleAccount = await prisma.oAuthAccount.findFirst({
+        where: { userId: req.user!.id, provider: 'google' }
+      });
 
-  createReadStream(fullPath).pipe(res);
+      if (googleAccount) {
+        const driveObject = await getDriveFileStream(googleAccount, asset.driveFileId);
+        res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
+        res.setHeader('Content-Type', driveObject.mimeType || asset.type || 'application/octet-stream');
+        driveObject.stream.pipe(res);
+        return;
+      }
+    } catch (err) {
+      console.error('[Drive download error]', asset.driveFileId, err);
+    }
+  }
+
+  console.error('[Download error] Asset not found in any location:', asset.storageKey);
+  return res.status(404).json({ message: 'Asset not found in any storage location' });
 });
 
 assetRouter.delete('/:assetId', async (req, res) => {
@@ -155,19 +208,13 @@ assetRouter.delete('/:assetId', async (req, res) => {
     return res.status(404).json({ message: 'Asset not found' });
   }
 
-  await prisma.asset.delete({
-    where: { id: asset.id }
-  });
+  await prisma.asset.delete({ where: { id: asset.id } });
 
   try {
     if (asset.driveFileId) {
       const googleAccount = await prisma.oAuthAccount.findFirst({
-        where: {
-          userId: req.user!.id,
-          provider: 'google'
-        }
+        where: { userId: req.user!.id, provider: 'google' }
       });
-
       if (googleAccount) {
         await deleteDriveFile(googleAccount, asset.driveFileId);
       }
@@ -207,9 +254,7 @@ assetRouter.post('/:assetId/notes', async (req, res) => {
       authorId: req.user!.id,
       body: parsed.data.body
     },
-    include: {
-      author: true
-    }
+    include: { author: true }
   });
 
   res.status(201).json({

@@ -51,6 +51,55 @@ export function fromS3StorageKey(storageKey: string) {
   return storageKey.startsWith(S3_PREFIX) ? storageKey.slice(S3_PREFIX.length) : storageKey;
 }
 
+export function legacyS3KeyCandidates(storageKey: string) {
+  const normalized = fromS3StorageKey(storageKey);
+  const candidates = new Set<string>();
+
+  // Current canonical key.
+  candidates.add(normalized);
+
+  // Legacy compatibility:
+  // - Some records can contain a plain filename that may have been uploaded under uploads/.
+  if (normalized.startsWith('uploads/')) {
+    const trimmed = normalized.slice('uploads/'.length);
+    if (trimmed) {
+      candidates.add(trimmed);
+    }
+  } else {
+    candidates.add(`uploads/${normalized}`);
+  }
+
+  // Legacy compatibility:
+  // - URL-form keys may be stored directly in DB.
+  try {
+    const parsedUrl = new URL(normalized);
+    const host = parsedUrl.hostname;
+    const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+
+    // Path-style: s3.<region>.amazonaws.com/<bucket>/<key>
+    // Virtual-hosted style: <bucket>.s3.<region>.amazonaws.com/<key>
+    if (host.includes('amazonaws.com') && pathParts.length > 0) {
+      if (host.startsWith(`${env.s3Bucket}.`)) {
+        const maybeKey = pathParts.join('/');
+        if (maybeKey) candidates.add(maybeKey);
+      } else if (pathParts[0] === env.s3Bucket && pathParts.length > 1) {
+        const maybeKey = pathParts.slice(1).join('/');
+        if (maybeKey) candidates.add(maybeKey);
+      }
+    }
+  } catch {
+    // Not a URL; continue.
+  }
+
+  // Legacy compatibility:
+  // - Some keys can include leading bucket segment.
+  if (normalized.startsWith(`${env.s3Bucket}/`)) {
+    candidates.add(normalized.slice(env.s3Bucket.length + 1));
+  }
+
+  return [...candidates];
+}
+
 export function buildS3ObjectKey(input: { userId: string; songId: string; fileName: string }) {
   const safeName = sanitizeName(input.fileName);
   const nonce = randomBytes(8).toString('hex');
@@ -90,6 +139,28 @@ export async function getS3Object(storageKey: string) {
   return object;
 }
 
+export async function getS3ObjectWithLegacyFallback(storageKey: string) {
+  const client = getS3Client();
+  const candidates = legacyS3KeyCandidates(storageKey);
+
+  for (const key of candidates) {
+    try {
+      const object = await client.send(
+        new GetObjectCommand({
+          Bucket: env.s3Bucket,
+          Key: key
+        })
+      );
+
+      return { object, resolvedStorageKey: toS3StorageKey(key) };
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  throw new Error('S3 object not found for any key candidate');
+}
+
 export async function getS3ObjectWithRange(storageKey: string, range?: string) {
   const client = getS3Client();
   const key = fromS3StorageKey(storageKey);
@@ -101,6 +172,29 @@ export async function getS3ObjectWithRange(storageKey: string, range?: string) {
       Range: range
     })
   );
+}
+
+export async function getS3ObjectWithRangeLegacyFallback(storageKey: string, range?: string) {
+  const client = getS3Client();
+  const candidates = legacyS3KeyCandidates(storageKey);
+
+  for (const key of candidates) {
+    try {
+      const object = await client.send(
+        new GetObjectCommand({
+          Bucket: env.s3Bucket,
+          Key: key,
+          Range: range
+        })
+      );
+
+      return { object, resolvedStorageKey: toS3StorageKey(key) };
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  throw new Error('S3 object not found for any key candidate');
 }
 
 export async function headS3Object(storageKey: string) {

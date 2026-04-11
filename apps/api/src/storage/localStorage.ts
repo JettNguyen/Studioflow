@@ -4,7 +4,7 @@ import { extname, resolve } from 'node:path';
 import crypto from 'node:crypto';
 import multer from 'multer';
 
-const uploadsDir = resolve(process.cwd(), 'apps/api/uploads');
+const uploadsDir = resolve(process.cwd(), 'uploads');
 
 async function ensureUploadDir() {
   await mkdir(uploadsDir, { recursive: true });

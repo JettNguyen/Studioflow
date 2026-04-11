@@ -192,14 +192,33 @@ export function ProjectPage() {
   if (loading) {
     return (
       <section>
-        <div className="skeleton skeleton--breadcrumb" />
-        <div className="skeleton skeleton--title" style={{ marginBottom: 20 }} />
+        <div className="page-header">
+          <div className="page-header__main">
+            <div className="skeleton" style={{ height: 26, width: '38%', borderRadius: 'var(--r-2)', marginBottom: 8 }} />
+            <div className="skeleton" style={{ height: 13, width: '20%', borderRadius: 'var(--r-1)' }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div className="skeleton skeleton--badge" style={{ width: 84, height: 28 }} />
+            <div className="skeleton skeleton--badge" style={{ width: 72, height: 28 }} />
+          </div>
+        </div>
+
+        <div className="project-create">
+          <div className="card">
+            <div className="skeleton" style={{ height: 38, borderRadius: 'var(--r-2)' }} />
+          </div>
+        </div>
+
         <ul className="song-list">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <li key={i} className="song-list-item">
-              <div className="song-row song-row--skeleton">
-                <div className="skeleton skeleton--line" />
-                <div className="skeleton skeleton--badge" />
+          {Array.from({ length: 4 }).map((_, i) => (
+            <li key={i} className="song-list-item" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 26, flexShrink: 0 }} />
+              <div className="song-row song-row--skeleton" style={{ flex: 1 }}>
+                <div className="skeleton skeleton--line" style={{ width: `${45 + (i % 3) * 15}%` }} />
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <div className="skeleton skeleton--badge" />
+                  <div className="skeleton skeleton--badge" />
+                </div>
               </div>
             </li>
           ))}

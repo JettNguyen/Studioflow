@@ -516,14 +516,43 @@ export function SongWorkspacePage() {
     return (
       <section className="workspace">
         <div className="workspace-main">
-          <div className="skeleton skeleton--breadcrumb" />
-          <div className="skeleton skeleton--title" style={{ marginBottom: 8 }} />
-          <div className="skeleton skeleton--line skeleton--line-short" style={{ marginBottom: 20 }} />
-          <div className="skeleton" style={{ height: 40, marginBottom: 12 }} />
-          <div className="skeleton" style={{ height: 120 }} />
+          {/* Song header ghost */}
+          <div className="song-header">
+            <div style={{ flex: 1 }}>
+              <div className="skeleton" style={{ height: 24, width: '42%', borderRadius: 'var(--r-2)', marginBottom: 10 }} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div className="skeleton skeleton--badge" style={{ width: 56 }} />
+                <div className="skeleton skeleton--badge" style={{ width: 68 }} />
+              </div>
+            </div>
+            <div className="skeleton skeleton--badge" style={{ width: 84, height: 28 }} />
+          </div>
+
+          {/* Upload toggle ghost */}
+          <div className="skeleton" style={{ height: 38, borderRadius: 'var(--r-2)' }} />
+
+          {/* Asset section ghost */}
+          <div className="asset-section">
+            <div className="skeleton" style={{ height: 14, width: 82, borderRadius: 'var(--r-1)', marginBottom: 12 }} />
+            <div className="asset-grid">
+              {[0, 1].map(i => (
+                <div key={i} className="skeleton" style={{ height: 148, borderRadius: 'var(--r-3)' }} />
+              ))}
+            </div>
+          </div>
+
+          <div className="asset-section">
+            <div className="skeleton" style={{ height: 14, width: 48, borderRadius: 'var(--r-1)', marginBottom: 12 }} />
+            <div className="asset-grid">
+              <div className="skeleton" style={{ height: 148, borderRadius: 'var(--r-3)' }} />
+            </div>
+          </div>
         </div>
+
         <div className="sidebar">
-          <div className="skeleton" style={{ height: 160, borderRadius: 'var(--r-3)' }} />
+          <div className="skeleton" style={{ height: 180, borderRadius: 'var(--r-3)' }} />
+          <div className="skeleton" style={{ height: 140, borderRadius: 'var(--r-3)' }} />
+          <div className="skeleton" style={{ height: 220, borderRadius: 'var(--r-3)' }} />
         </div>
       </section>
     );

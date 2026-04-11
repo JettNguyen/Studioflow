@@ -10,7 +10,14 @@ import { hashPassword, verifyPassword } from '../lib/password.js';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { resolveStoredFilePath, uploadImage } from '../storage/localStorage.js';
-import { buildS3ObjectKey, deleteS3Object, getS3Object, isS3StorageKey, uploadFileToS3 } from '../storage/s3Storage.js';
+import {
+  buildS3ObjectKey,
+  deleteS3Object,
+  getS3Object,
+  getS3ObjectWithLegacyFallback,
+  isS3StorageKey,
+  uploadFileToS3
+} from '../storage/s3Storage.js';
 import { getGrantedScopes } from '../utils/drive.js';
 import { mapAuthUser } from '../utils/mappers.js';
 
@@ -165,14 +172,29 @@ authRouter.get('/me/avatar', requireAuth, async (req, res) => {
       res.setHeader('Content-Type', obj.ContentType || 'image/jpeg');
       res.setHeader('Cache-Control', 'private, max-age=86400');
       (obj.Body as NodeJS.ReadableStream).pipe(res);
-    } catch {
+    } catch (err) {
+      console.error('[S3 avatar error]', user.avatarStorageKey, err);
       return res.status(404).json({ message: 'Avatar not found in storage' });
     }
     return;
   }
 
   const fullPath = resolveStoredFilePath(user.avatarStorageKey);
-  if (!existsSync(fullPath)) return res.status(404).json({ message: 'Avatar not found' });
+  if (!existsSync(fullPath)) {
+    if (env.s3Enabled) {
+      try {
+        const { object } = await getS3ObjectWithLegacyFallback(user.avatarStorageKey);
+        res.setHeader('Content-Type', object.ContentType || 'image/jpeg');
+        res.setHeader('Cache-Control', 'private, max-age=86400');
+        (object.Body as NodeJS.ReadableStream).pipe(res);
+        return;
+      } catch {
+        // Fall through to local not found response.
+      }
+    }
+
+    return res.status(404).json({ message: 'Avatar not found' });
+  }
 
   res.setHeader('Content-Type', 'image/jpeg');
   res.setHeader('Cache-Control', 'private, max-age=86400');

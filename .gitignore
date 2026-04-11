@@ -8,3 +8,4 @@ coverage/
 .vscode/settings.json
 apps/web/.vite/
 apps/api/uploads/
+.claude/

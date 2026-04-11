@@ -9,6 +9,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api
 export function ProfilePage() {
   const { user, logout, setUser } = useAuth();
   const [driveStatus, setDriveStatus] = useState<DriveConnectionStatus | null>(null);
+  const [driveLoading, setDriveLoading] = useState(true);
   const [driveError, setDriveError] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});
@@ -20,7 +21,8 @@ export function ProfilePage() {
   useEffect(() => {
     apiRequest<DriveConnectionStatus>('/auth/drive-status')
       .then(setDriveStatus)
-      .catch(e => setDriveError(e instanceof Error ? e.message : 'Unable to load Drive status'));
+      .catch(e => setDriveError(e instanceof Error ? e.message : 'Unable to load Drive status'))
+      .finally(() => setDriveLoading(false));
 
     apiRequest<ProjectSummary[]>('/projects')
       .then(setProjects)
@@ -136,6 +138,25 @@ export function ProfilePage() {
 
       {/* ── Google Drive ── */}
       <div className="card profile-section">
+        {driveLoading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="skeleton" style={{ height: 18, width: 110, borderRadius: 'var(--r-1)' }} />
+                <div className="skeleton" style={{ height: 13, width: 240, borderRadius: 'var(--r-1)' }} />
+              </div>
+              <div className="skeleton skeleton--badge" style={{ width: 108, height: 30 }} />
+            </div>
+            <div style={{ display: 'flex', gap: 15, alignItems: 'center', marginTop: 4 }}>
+              <div className="skeleton" style={{ width: 40, height: 40, borderRadius: 'var(--r-3)', flexShrink: 0 }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+                <div className="skeleton" style={{ height: 14, width: '40%', borderRadius: 'var(--r-1)' }} />
+                <div className="skeleton" style={{ height: 12, width: '70%', borderRadius: 'var(--r-1)' }} />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
         <div className="profile-section__header">
           <div>
             <h3>Google Drive</h3>
@@ -204,6 +225,8 @@ export function ProfilePage() {
               </div>
             ))}
           </div>
+        )}
+          </>
         )}
       </div>
 

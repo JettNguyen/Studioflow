@@ -137,3 +137,32 @@ export async function deleteDriveFile(account: OAuthAccount, driveFileId: string
     fileId: driveFileId
   });
 }
+
+export async function getDriveFileStream(account: OAuthAccount, driveFileId: string, range?: string) {
+  const oauthClient = getAuthorizedClient(account);
+  const drive = google.drive({ version: 'v3', auth: oauthClient });
+
+  const [metaRes, mediaRes] = await Promise.all([
+    drive.files.get({
+      fileId: driveFileId,
+      fields: 'name,mimeType,size'
+    }),
+    drive.files.get(
+      {
+        fileId: driveFileId,
+        alt: 'media'
+      },
+      {
+        responseType: 'stream',
+        headers: range ? { Range: range } : undefined
+      }
+    )
+  ]);
+
+  return {
+    stream: mediaRes.data as NodeJS.ReadableStream,
+    mimeType: metaRes.data.mimeType || undefined,
+    size: typeof metaRes.data.size === 'string' ? Number.parseInt(metaRes.data.size, 10) : undefined,
+    name: metaRes.data.name || undefined
+  };
+}

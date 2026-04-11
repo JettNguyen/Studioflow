@@ -7,7 +7,14 @@ import { prisma } from '../lib/prisma.js';
 import { env } from '../config.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { resolveStoredFilePath, uploadImage } from '../storage/localStorage.js';
-import { buildS3ObjectKey, deleteS3Object, getS3Object, isS3StorageKey, uploadFileToS3 } from '../storage/s3Storage.js';
+import {
+  buildS3ObjectKey,
+  deleteS3Object,
+  getS3Object,
+  getS3ObjectWithLegacyFallback,
+  isS3StorageKey,
+  uploadFileToS3
+} from '../storage/s3Storage.js';
 import { createDriveFolder, ensureStudioflowProjectFolder } from '../utils/drive.js';
 import { mapProjectDetails, mapProjectSummary } from '../utils/mappers.js';
 
@@ -336,14 +343,29 @@ projectRouter.get('/:projectId/cover', async (req, res) => {
       res.setHeader('Content-Type', obj.ContentType || 'image/jpeg');
       res.setHeader('Cache-Control', 'private, max-age=86400');
       (obj.Body as NodeJS.ReadableStream).pipe(res);
-    } catch {
+    } catch (err) {
+      console.error('[S3 cover error]', project.coverImageKey, err);
       return res.status(404).json({ message: 'Cover image not found in storage' });
     }
     return;
   }
 
   const fullPath = resolveStoredFilePath(project.coverImageKey);
-  if (!existsSync(fullPath)) return res.status(404).json({ message: 'Cover image not found' });
+  if (!existsSync(fullPath)) {
+    if (env.s3Enabled) {
+      try {
+        const { object } = await getS3ObjectWithLegacyFallback(project.coverImageKey);
+        res.setHeader('Content-Type', object.ContentType || 'image/jpeg');
+        res.setHeader('Cache-Control', 'private, max-age=86400');
+        (object.Body as NodeJS.ReadableStream).pipe(res);
+        return;
+      } catch {
+        // Fall through to local not found response.
+      }
+    }
+
+    return res.status(404).json({ message: 'Cover image not found' });
+  }
 
   res.setHeader('Content-Type', 'image/jpeg');
   res.setHeader('Cache-Control', 'private, max-age=86400');
