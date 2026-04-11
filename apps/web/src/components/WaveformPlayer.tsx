@@ -199,7 +199,6 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
       <audio
         ref={audioRef}
         src={src}
-        crossOrigin="use-credentials"
         onLoadedMetadata={e => setDur((e.target as HTMLAudioElement).duration)}
         onEnded={() => { setPlaying(false); progressRef.current = 0; setTime(0); redraw(0); }}
       />

@@ -129,6 +129,18 @@
   transform: scale(1.2);
 }
 
+/* Hide the volume slider on touch / coarse-pointer devices (mobile/tablet) */
+@media (pointer: coarse), (hover: none) {
+  .wfp-volume__slider {
+    display: none;
+  }
+
+  /* Reduce spacing when slider is hidden so layout stays compact */
+  .wfp-volume {
+    gap: 0;
+  }
+}
+
 /* ── Time display ── */
 .wfp-time {
   display: flex;

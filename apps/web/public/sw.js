@@ -12,7 +12,7 @@
  * Cache names are versioned. Bump CACHE_VER to force all clients to update.
  */
 
-const CACHE_VER = 'v1';
+const CACHE_VER = 'v2';
 const STATIC  = `sf-static-${CACHE_VER}`;   // immutable assets + fonts
 const DYNAMIC = `sf-dynamic-${CACHE_VER}`;  // SPA shell + misc same-origin
 const API     = `sf-api-${CACHE_VER}`;      // API responses (short-lived)
@@ -87,7 +87,17 @@ self.addEventListener('fetch', event => {
 
   // ── API requests — network-first ──
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(networkFirst(request, API));
+    // Skip media streaming endpoints entirely — let the browser handle range
+    // requests natively. Service worker interception breaks audio/video duration
+    // detection and seeking on iOS Safari PWA (range responses aren't handled
+    // correctly when proxied through a SW fetch).
+    if (/\/assets\/[^/]+\/(stream|download)$/.test(url.pathname)) return;
+
+    // Force credentials: 'include' for all API requests so that session cookies
+    // are sent even for requests initiated by <img> or <audio> elements, which
+    // default to credentials: 'same-origin' and lose cookies in iOS PWA mode.
+    const apiRequest = new Request(request, { credentials: 'include' });
+    event.respondWith(networkFirst(apiRequest, API));
     return;
   }
 
