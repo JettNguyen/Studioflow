@@ -1,11 +1,43 @@
 import type { CreateSongRequest, ProjectDetails, SongWorkspace } from '@studioflow/shared';
-import { useEffect, useState, type DragEvent, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPencil, faCheck, faXmark, faTrash } from '@fortawesome/free-solid-svg-icons';
-import { apiRequest } from '../lib/api';
+import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
 import { Breadcrumb } from '../components/Breadcrumb';
 import './ProjectPage.css';
+
+const PROJECT_ASSET_CATEGORIES: ProjectAssetCategory[] = [
+  'Shot List', 'Filming Clip', 'Trailer Version', 'Trailer Audio', 'Other'
+];
+
+type ProjectAssetCategory = 'Shot List' | 'Filming Clip' | 'Trailer Version' | 'Trailer Audio' | 'Other';
+
+type ProjectAsset = {
+  id: string;
+  name: string;
+  type: string;
+  category: ProjectAssetCategory;
+  fileSizeBytes: number | null;
+  isLink: boolean;
+  downloadUrl: string;
+  createdAt: string;
+};
+
+function fmtFileBytes(bytes: number | null): string {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fmtFileType(type: string): string {
+  if (!type) return 'File';
+  if (type.startsWith('audio/')) return (type.split('/')[1] ?? 'audio').toUpperCase();
+  if (type.startsWith('video/')) return (type.split('/')[1] ?? 'video').toUpperCase();
+  if (type.startsWith('image/')) return (type.split('/')[1] ?? 'image').toUpperCase();
+  const ext = type.split('/')[1];
+  return ext ? ext.toUpperCase() : 'File';
+}
 
 export function ProjectPage() {
   const navigate = useNavigate();
@@ -23,6 +55,22 @@ export function ProjectPage() {
   const [dragOverSongId, setDragOverSongId] = useState<string | null>(null);
   const [previewSongs, setPreviewSongs] = useState<ProjectDetails['songs']>([]);
 
+  // Project Files (misc assets)
+  const [miscAssets, setMiscAssets] = useState<ProjectAsset[]>([]);
+  const [miscUploadOpen, setMiscUploadOpen] = useState(false);
+  const [miscUploading, setMiscUploading] = useState(false);
+  const [miscUploadProgress, setMiscUploadProgress] = useState<number | null>(null);
+  const [miscAssetName, setMiscAssetName] = useState('');
+  const [miscAssetCategory, setMiscAssetCategory] = useState<ProjectAssetCategory>('Other');
+  const [miscSelectedFile, setMiscSelectedFile] = useState<File | null>(null);
+  const [miscLinkUrl, setMiscLinkUrl] = useState('');
+  const [editingMiscAssetId, setEditingMiscAssetId] = useState<string | null>(null);
+  const [editMiscAssetName, setEditMiscAssetName] = useState('');
+  const [editMiscAssetCategory, setEditMiscAssetCategory] = useState<ProjectAssetCategory>('Other');
+  const [editMiscLinkUrl, setEditMiscLinkUrl] = useState('');
+  const [savingMiscAssetEdit, setSavingMiscAssetEdit] = useState(false);
+  const miscFileInputRef = useRef<HTMLInputElement | null>(null);
+
   useEffect(() => {
     if (!projectId) {
       return;
@@ -34,6 +82,13 @@ export function ProjectPage() {
         setError(loadError instanceof Error ? loadError.message : 'Unable to load project');
       })
       .finally(() => setLoading(false));
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    apiRequest<ProjectAsset[]>(`/projects/${projectId}/assets`)
+      .then(setMiscAssets)
+      .catch(() => { /* non-fatal */ });
   }, [projectId]);
 
   useEffect(() => {
@@ -163,6 +218,104 @@ export function ProjectPage() {
       setProject(prev => prev ? { ...prev, songs: prev.songs.filter(s => s.id !== songId) } : prev);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to delete song');
+    }
+  };
+
+  const uploadMiscAsset = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!projectId) return;
+
+    // Shot List category → save as a link, not a file upload
+    if (miscAssetCategory === 'Shot List') {
+      if (!miscLinkUrl.trim()) return;
+      try {
+        setMiscUploading(true);
+        setError(null);
+        const newAsset = await apiRequest<ProjectAsset>(`/projects/${projectId}/assets/link`, {
+          method: 'POST',
+          body: {
+            category: 'Shot List',
+            linkUrl: miscLinkUrl.trim(),
+            name: miscAssetName.trim() || 'Shot List'
+          }
+        });
+        setMiscAssets(prev => [newAsset, ...prev]);
+        setMiscAssetName('');
+        setMiscLinkUrl('');
+        setMiscUploadOpen(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to save link');
+      } finally {
+        setMiscUploading(false);
+      }
+      return;
+    }
+
+    if (!miscSelectedFile) return;
+    try {
+      setMiscUploading(true);
+      setMiscUploadProgress(0);
+      setError(null);
+      const fd = new FormData();
+      fd.append('file', miscSelectedFile);
+      fd.append('category', miscAssetCategory);
+      if (miscAssetName.trim()) fd.append('name', miscAssetName.trim());
+      const newAsset = await apiUploadWithProgress<ProjectAsset>(
+        `/projects/${projectId}/assets`, fd, setMiscUploadProgress
+      );
+      setMiscAssets(prev => [newAsset, ...prev]);
+      setMiscAssetName('');
+      setMiscSelectedFile(null);
+      setMiscAssetCategory('Other');
+      if (miscFileInputRef.current) miscFileInputRef.current.value = '';
+      setMiscUploadOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setMiscUploading(false);
+      setMiscUploadProgress(null);
+    }
+  };
+
+  const deleteMiscAsset = async (assetId: string, assetName: string) => {
+    if (!projectId || !window.confirm(`Remove "${assetName}"? This cannot be undone.`)) return;
+    try {
+      await apiRequest(`/projects/${projectId}/assets/${assetId}`, { method: 'DELETE' });
+      setMiscAssets(prev => prev.filter(a => a.id !== assetId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove file');
+    }
+  };
+
+  const startEditMiscAsset = (asset: ProjectAsset) => {
+    setEditingMiscAssetId(asset.id);
+    setEditMiscAssetName(asset.name);
+    setEditMiscAssetCategory(asset.category);
+    setEditMiscLinkUrl(asset.isLink ? asset.downloadUrl : '');
+  };
+
+  const saveMiscAsset = async (asset: ProjectAsset) => {
+    if (!projectId) return;
+    try {
+      setSavingMiscAssetEdit(true);
+      const payload: Record<string, string> = {
+        name: editMiscAssetName.trim(),
+        category: editMiscAssetCategory
+      };
+      if (asset.isLink) {
+        payload.linkUrl = editMiscLinkUrl.trim();
+      }
+      const updated = await apiRequest<ProjectAsset>(`/projects/${projectId}/assets/${asset.id}`, {
+        method: 'PATCH',
+        body: payload
+      });
+      setMiscAssets(prev => prev.map(a => a.id === asset.id ? updated : a));
+      setEditingMiscAssetId(null);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update project file');
+    } finally {
+      setSavingMiscAssetEdit(false);
     }
   };
 
@@ -298,6 +451,8 @@ export function ProjectPage() {
         </div>
       </div>
 
+      <h3 className="section-heading">Songs</h3>
+
       {project.songs.length ? (
         <ul className="song-list">
           {previewSongs.map((song) => (
@@ -360,6 +515,228 @@ export function ProjectPage() {
           <p>Create the first song in this project to start working.</p>
         </div>
       )}
+
+      {/* ── Project Files (misc assets) ──────────────────────────────── */}
+      <div className="project-files">
+        <div className="project-files__header">
+          <h3 className="section-heading" style={{ margin: 0 }}>Project Files</h3>
+          <p className="project-files__sub">Non-song assets — trailer clips, shot lists, behind-the-scenes footage, etc.</p>
+          <button
+            className={`upload-toggle${miscUploadOpen ? ' upload-toggle--open' : ''}`}
+            type="button"
+            onClick={() => setMiscUploadOpen(o => !o)}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+              <path d="M5 1V9M1 5H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            Upload file
+            <svg className="upload-toggle__chevron" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+              <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </div>
+
+        {miscUploadOpen && (
+          <div className="card misc-upload-card">
+            <form className="form-stack" onSubmit={uploadMiscAsset}>
+              <div className="form-row">
+                <input
+                  className="input"
+                  value={miscAssetName}
+                  onChange={e => setMiscAssetName(e.target.value)}
+                  placeholder={miscAssetCategory === 'Shot List' ? 'Label (optional)' : 'File name (optional)'}
+                />
+                <select
+                  className="select"
+                  value={miscAssetCategory}
+                  onChange={e => {
+                    setMiscAssetCategory(e.target.value as ProjectAssetCategory);
+                    setMiscSelectedFile(null);
+                    setMiscLinkUrl('');
+                    if (miscFileInputRef.current) miscFileInputRef.current.value = '';
+                  }}
+                >
+                  {PROJECT_ASSET_CATEGORIES.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+
+              {miscAssetCategory === 'Shot List' ? (
+                /* Link input for Shot List */
+                <div className="form-row">
+                  <input
+                    className="input"
+                    type="url"
+                    value={miscLinkUrl}
+                    onChange={e => setMiscLinkUrl(e.target.value)}
+                    placeholder="https://docs.google.com/document/d/…"
+                    required
+                  />
+                  <button
+                    className="btn btn-primary btn-sm"
+                    type="submit"
+                    disabled={miscUploading || !miscLinkUrl.trim()}
+                    style={{ flexShrink: 0 }}
+                  >
+                    {miscUploading ? 'Saving…' : 'Save link'}
+                  </button>
+                </div>
+              ) : (
+                /* File picker for all other categories */
+                <div className="file-picker-row">
+                  <label className="btn btn-ghost btn-sm file-picker-label" htmlFor="misc-file-input">
+                    Choose file
+                  </label>
+                  <span className="file-picker-name">{miscSelectedFile?.name ?? 'No file selected'}</span>
+                  <input
+                    id="misc-file-input"
+                    ref={miscFileInputRef}
+                    className="file-picker-hidden"
+                    type="file"
+                    onChange={e => setMiscSelectedFile(e.target.files?.[0] ?? null)}
+                    required
+                  />
+                  <button
+                    className="btn btn-primary btn-sm"
+                    type="submit"
+                    disabled={miscUploading || !miscSelectedFile}
+                    style={{ marginLeft: 'auto' }}
+                  >
+                    {miscUploading ? 'Uploading…' : 'Upload'}
+                  </button>
+                </div>
+              )}
+
+              {miscUploading && miscUploadProgress !== null && (
+                <div className="upload-progress">
+                  <div className="upload-progress__bar" style={{ width: `${miscUploadProgress}%` }} />
+                  <span className="upload-progress__label">{miscUploadProgress}%</span>
+                </div>
+              )}
+            </form>
+          </div>
+        )}
+
+        {miscAssets.length > 0 && (
+          <ul className="misc-asset-list">
+            {miscAssets.map(asset => (
+              <li key={asset.id} className="misc-asset-row">
+                {asset.isLink && (
+                  <svg className="misc-asset-row__link-icon" width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+                    <rect width="20" height="20" rx="3" fill="#4285F4" opacity="0.15"/>
+                    <path d="M5 5h6l4 4v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" stroke="#4285F4" strokeWidth="1.2" fill="none"/>
+                    <path d="M11 5v4h4" stroke="#4285F4" strokeWidth="1.2" strokeLinejoin="round" fill="none"/>
+                    <path d="M7 10h6M7 12h6M7 14h4" stroke="#4285F4" strokeWidth="1" strokeLinecap="round"/>
+                  </svg>
+                )}
+                <div className="misc-asset-row__info">
+                  <span className="misc-asset-row__name">{asset.name}</span>
+                  <div className="misc-asset-row__meta">
+                    <span className="badge badge-default">{asset.category}</span>
+                    {!asset.isLink && asset.type && <span className="misc-asset-row__type">{fmtFileType(asset.type)}</span>}
+                    {!asset.isLink && asset.fileSizeBytes && (
+                      <span className="misc-asset-row__size">{fmtFileBytes(asset.fileSizeBytes)}</span>
+                    )}
+                    {asset.isLink && <span className="misc-asset-row__type">Google Doc</span>}
+                  </div>
+                </div>
+
+                <div className="misc-asset-row__actions">
+                  <a
+                    className="btn btn-ghost btn-icon"
+                    href={asset.isLink ? asset.downloadUrl : resolveApiUrl(asset.downloadUrl)}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={asset.isLink ? 'Open link' : 'Download file'}
+                    title={asset.isLink ? 'Open link' : 'Download file'}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                      {asset.isLink ? (
+                        <path d="M4 2.5h5.5V8M9.5 2.5 2.5 9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                      ) : (
+                        <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                      )}
+                    </svg>
+                  </a>
+                  <button
+                    className="btn btn-ghost btn-icon"
+                    type="button"
+                    onClick={() => startEditMiscAsset(asset)}
+                    aria-label="Edit project file"
+                    title="Edit"
+                  >
+                    <FontAwesomeIcon icon={faPencil} />
+                  </button>
+                  <button
+                    className="btn btn-danger btn-icon"
+                    type="button"
+                    onClick={() => deleteMiscAsset(asset.id, asset.name)}
+                    aria-label="Remove project file"
+                    title="Remove"
+                  >
+                    <FontAwesomeIcon icon={faTrash} />
+                  </button>
+                </div>
+
+                {editingMiscAssetId === asset.id && (
+                  <div className="misc-asset-edit-form">
+                    <div className="form-row">
+                      <input
+                        className="input"
+                        value={editMiscAssetName}
+                        onChange={e => setEditMiscAssetName(e.target.value)}
+                        placeholder="Asset name"
+                      />
+                      <select
+                        className="select"
+                        value={editMiscAssetCategory}
+                        onChange={e => setEditMiscAssetCategory(e.target.value as ProjectAssetCategory)}
+                      >
+                        {PROJECT_ASSET_CATEGORIES.map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                      {asset.isLink && (
+                        <input
+                          className="input"
+                          type="url"
+                          value={editMiscLinkUrl}
+                          onChange={e => setEditMiscLinkUrl(e.target.value)}
+                          placeholder="https://docs.google.com/document/d/..."
+                        />
+                      )}
+                      <button
+                        className="btn btn-primary btn-icon"
+                        type="button"
+                        onClick={() => saveMiscAsset(asset)}
+                        disabled={savingMiscAssetEdit || !editMiscAssetName.trim() || (asset.isLink && !editMiscLinkUrl.trim())}
+                        aria-label="Save"
+                        title="Save"
+                      >
+                        <FontAwesomeIcon icon={faCheck} />
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-icon"
+                        type="button"
+                        onClick={() => setEditingMiscAssetId(null)}
+                        aria-label="Cancel"
+                        title="Cancel"
+                      >
+                        <FontAwesomeIcon icon={faXmark} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {miscAssets.length === 0 && !miscUploadOpen && (
+          <p className="misc-empty">No project files yet. Upload trailer clips, shot lists, and other assets here.</p>
+        )}
+      </div>
     </section>
   );
 }

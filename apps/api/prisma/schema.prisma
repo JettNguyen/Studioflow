@@ -58,6 +58,22 @@ model Project {
   createdBy       User                @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Cascade)
   memberships     ProjectMembership[]
   songs           Song[]
+  projectAssets   ProjectAsset[]
+}
+
+model ProjectAsset {
+  id            String               @id @default(cuid())
+  projectId     String
+  name          String
+  type          String               @default("")
+  category      ProjectAssetCategory @default(Misc)
+  fileSizeBytes Int?
+  storageKey    String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  project       Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }
 
 model ProjectMembership {
@@ -81,6 +97,7 @@ model Song {
   lyrics        String?
   keySignature  String?
   bpm           Int?
+  shotListUrl   String?
   driveFolderId  String?
   released       Boolean  @default(false)
   keyManuallySet Boolean  @default(false)
@@ -198,4 +215,12 @@ enum AssetCategory {
   Videos
   Beat
   Stems
+}
+
+enum ProjectAssetCategory {
+  ShotList
+  FilmingClip
+  TrailerVersion
+  TrailerAudio
+  Misc
 }

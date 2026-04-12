@@ -6,6 +6,19 @@ export type SongTaskStatus = 'Open' | 'In Review' | 'Done';
 
 export type AssetCategory = 'Song Audio' | 'Social Media Content' | 'Videos' | 'Beat' | 'Stems';
 
+export type ProjectAssetCategory = 'Shot List' | 'Filming Clip' | 'Trailer Version' | 'Trailer Audio' | 'Other';
+
+export interface ProjectAsset {
+  id: string;
+  name: string;
+  type: string;
+  category: ProjectAssetCategory;
+  fileSizeBytes: number | null;
+  isLink: boolean;
+  downloadUrl: string;
+  createdAt: string;
+}
+
 export interface AuthUser {
   id: string;
   email: string;
@@ -37,6 +50,7 @@ export interface ProjectSummary {
   genre: string;
   released: boolean;
   songCount: number;
+  projectAssetCount: number;
   collaboratorCount: number;
   driveSyncStatus: ProjectSyncStatus;
   coverImageUrl: string | null;
@@ -57,6 +71,7 @@ export interface ProjectDetails {
   description: string;
   genre: string;
   released: boolean;
+  projectAssetCount: number;
   driveSyncStatus: ProjectSyncStatus;
   driveFolderId: string | null;
   coverImageUrl: string | null;
@@ -115,6 +130,7 @@ export interface SongWorkspace {
   lyrics: string | null;
   key: string | null;
   bpm: number | null;
+  shotListUrl: string | null;
   assets: SongAsset[];
   notes: SongNote[];
   tasks: SongTask[];

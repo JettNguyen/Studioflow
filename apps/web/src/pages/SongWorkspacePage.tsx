@@ -17,7 +17,7 @@ import { WaveformPlayer } from '../components/WaveformPlayer';
 import { VideoThumbnail } from '../components/VideoThumbnail';
 import './SongWorkspacePage.css';
 
-type SongWorkspaceWithLyrics = SongWorkspace & { lyrics?: string | null };
+type SongWorkspaceWithLyrics = SongWorkspace & { lyrics?: string | null; shotListUrl?: string | null };
 
 const VERSIONED_CATEGORIES: AssetCategory[] = ['Song Audio', 'Videos', 'Beat', 'Stems'];
 const CATEGORY_ORDER: AssetCategory[] = ['Song Audio', 'Beat', 'Stems', 'Videos', 'Social Media Content'];
@@ -85,6 +85,7 @@ export function SongWorkspacePage() {
 
   // Upload form
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadMode, setUploadMode] = useState<'file' | 'shotlist'>('file');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [assetName, setAssetName] = useState('');
@@ -94,6 +95,11 @@ export function SongWorkspacePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [detectedFeatures, setDetectedFeatures] = useState<AudioFeatures | null>(null);
+
+  // Shot list
+  const [shotListInput, setShotListInput] = useState('');
+  const [savingShotList, setSavingShotList] = useState(false);
+  const [shotListEmbedOpen, setShotListEmbedOpen] = useState(false);
 
   // Key/BPM inline edit
   const [editingMeta, setEditingMeta] = useState(false);
@@ -109,6 +115,11 @@ export function SongWorkspacePage() {
   // Per-asset notes
   const [assetNoteDrafts, setAssetNoteDrafts] = useState<Record<string, string>>({});
   const [openAssetNotes, setOpenAssetNotes] = useState<Set<string>>(new Set());
+  const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+  const [editAssetName, setEditAssetName] = useState('');
+  const [editAssetCategory, setEditAssetCategory] = useState<AssetCategory>('Song Audio');
+  const [editAssetVersionGroup, setEditAssetVersionGroup] = useState('');
+  const [savingAssetEdit, setSavingAssetEdit] = useState(false);
 
   // Version selection
   const [selectedVersionByGroup, setSelectedVersionByGroup] = useState<Record<string, string>>({});
@@ -187,7 +198,12 @@ export function SongWorkspacePage() {
   useEffect(() => {
     if (!songId) return;
     apiRequest<SongWorkspaceWithLyrics>(`/songs/${songId}`)
-      .then(s => { setSong(s); setLyricsDraft(s.lyrics ?? ''); setError(null); })
+      .then(s => {
+        setSong(s);
+        setLyricsDraft(s.lyrics ?? '');
+        setShotListInput(s.shotListUrl ?? '');
+        setError(null);
+      })
       .catch(e => setError(e instanceof Error ? e.message : 'Unable to load song'));
   }, [songId]);
 
@@ -197,6 +213,7 @@ export function SongWorkspacePage() {
     const s = await apiRequest<SongWorkspaceWithLyrics>(`/songs/${songId}`);
     setSong(s);
     setLyricsDraft(s.lyrics ?? '');
+    setShotListInput(s.shotListUrl ?? '');
   };
 
   // ── Actions ───────────────────────────────────────────────────────────────
@@ -344,6 +361,68 @@ export function SongWorkspacePage() {
     } catch (err) { setError(err instanceof Error ? err.message : 'Failed to add note'); }
   };
 
+  const saveShotList = async () => {
+    if (!songId) return;
+    const url = shotListInput.trim() || null;
+    try {
+      setSavingShotList(true);
+      const updated = await apiRequest<SongWorkspaceWithLyrics>(`/songs/${songId}`, {
+        method: 'PATCH',
+        body: { shotListUrl: url }
+      });
+      setSong(updated);
+      setShotListInput(updated.shotListUrl ?? '');
+      setUploadOpen(false);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save shot list');
+    } finally {
+      setSavingShotList(false);
+    }
+  };
+
+  const startEditAsset = (asset: SongAsset) => {
+    setEditingAssetId(asset.id);
+    setEditAssetName(asset.name);
+    setEditAssetCategory(asset.category);
+    setEditAssetVersionGroup(asset.versionGroup);
+  };
+
+  const saveAssetEdit = async (assetId: string) => {
+    try {
+      setSavingAssetEdit(true);
+      await apiRequest(`/assets/${assetId}`, {
+        method: 'PATCH',
+        body: {
+          name: editAssetName.trim(),
+          category: editAssetCategory,
+          versionGroup: editAssetVersionGroup.trim()
+        }
+      });
+      await refreshSong();
+      setEditingAssetId(null);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update asset');
+    } finally {
+      setSavingAssetEdit(false);
+    }
+  };
+
+  const removeShotList = async () => {
+    if (!songId || !window.confirm('Remove the shot list link from this song?')) return;
+    try {
+      const updated = await apiRequest<SongWorkspaceWithLyrics>(`/songs/${songId}`, {
+        method: 'PATCH',
+        body: { shotListUrl: null }
+      });
+      setSong(updated);
+      setShotListInput('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove shot list');
+    }
+  };
+
   const toggleAssetNotes = (assetId: string) => {
     setOpenAssetNotes(prev => {
       const next = new Set(prev);
@@ -446,27 +525,116 @@ export function SongWorkspacePage() {
 
         {/* Actions */}
         <div className="asset-actions">
+          <button
+            className="btn btn-ghost btn-icon"
+            type="button"
+            onClick={() => startEditAsset(asset)}
+            aria-label="Edit asset"
+            title="Edit asset"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M8.5 1.5l2 2L4 10H2V8L8.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+            </svg>
+          </button>
           {asset.mediaKind === 'video' && asset.streamUrl && (
-            <button className="btn btn-ghost btn-sm" type="button" onClick={() => setActiveVideoAsset(asset)}>
-              Play video
+            <button
+              className="btn btn-ghost btn-icon"
+              type="button"
+              onClick={() => setActiveVideoAsset(asset)}
+              aria-label="Play video"
+              title="Play video"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M4 2.5v7l5-3.5-5-3.5Z" fill="currentColor"/>
+              </svg>
             </button>
           )}
           {asset.downloadUrl && (
-            <a className="asset-download-link" href={resolveApiUrl(asset.downloadUrl)} target="_blank" rel="noreferrer">
-              Download
+            <a
+              className="asset-download-link btn-icon"
+              href={resolveApiUrl(asset.downloadUrl)}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Download"
+              title="Download"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
             </a>
           )}
-          <button className="btn btn-danger btn-sm" type="button" onClick={() => removeAsset(asset)}>
-            Remove
+          <button
+            className="btn btn-danger btn-icon"
+            type="button"
+            onClick={() => removeAsset(asset)}
+            aria-label="Remove asset"
+            title="Remove asset"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M2.5 3h7M4.5 3V2h3v1M5 5v4M7 5v4M3.5 3l.4 6.2a1 1 0 001 .8h1.2a1 1 0 001-.8L8 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </button>
           <button
-            className={`btn btn-ghost btn-sm asset-notes-toggle${notesOpen ? ' active' : ''}`}
+            className={`btn btn-ghost btn-icon asset-notes-toggle${notesOpen ? ' active' : ''}`}
             type="button"
             onClick={() => toggleAssetNotes(asset.id)}
+            aria-label={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
+            title={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
           >
-            Notes{asset.notes.length > 0 ? ` (${asset.notes.length})` : ''}
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M2 2.5h8v5.5H5l-2.5 2v-2H2v-5.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+            </svg>
           </button>
         </div>
+
+        {editingAssetId === asset.id && (
+          <div className="asset-edit-form">
+            <div className="form-row">
+              <input
+                className="input"
+                value={editAssetName}
+                onChange={e => setEditAssetName(e.target.value)}
+                placeholder="Asset name"
+              />
+              <select
+                className="select"
+                value={editAssetCategory}
+                onChange={e => setEditAssetCategory(e.target.value as AssetCategory)}
+              >
+                {CATEGORY_ORDER.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
+              <input
+                className="input"
+                value={editAssetVersionGroup}
+                onChange={e => setEditAssetVersionGroup(e.target.value)}
+                placeholder="Version group"
+              />
+              <button
+                className="btn btn-primary btn-icon"
+                type="button"
+                onClick={() => saveAssetEdit(asset.id)}
+                disabled={savingAssetEdit || !editAssetName.trim()}
+                aria-label="Save asset"
+                title="Save"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path d="M2 6.5 4.5 9 10 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              <button
+                className="btn btn-ghost btn-icon"
+                type="button"
+                onClick={() => setEditingAssetId(null)}
+                aria-label="Cancel"
+                title="Cancel"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Collapsible notes */}
         {notesOpen && (
@@ -656,54 +824,105 @@ export function SongWorkspacePage() {
 
           {uploadOpen && (
             <div className="card upload-form-card">
-              <form className="form-stack" onSubmit={uploadAsset}>
-                <div className="form-row">
-                  <input className="input" value={assetName} onChange={e => setAssetName(e.target.value)} placeholder="Asset name (optional)" />
-                  <select className="select" value={assetCategory} onChange={e => setAssetCategory(e.target.value as AssetCategory)}>
-                    {CATEGORY_ORDER.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                  </select>
-                  <input className="input" value={assetVersionGroup} onChange={e => setAssetVersionGroup(e.target.value)} placeholder="Version group (optional)" />
-                </div>
-                <div className="file-picker-row">
-                  <label className="btn btn-ghost btn-sm file-picker-label" htmlFor="asset-file-input">Choose file</label>
-                  <span className="file-picker-name">{selectedFile?.name ?? 'No file selected'}</span>
-                  <input
-                    id="asset-file-input"
-                    ref={fileInputRef}
-                    className="file-picker-hidden"
-                    type="file"
-                    onChange={e => setSelectedFile(e.target.files?.[0] ?? null)}
-                    required
-                  />
-                  <button className="btn btn-primary btn-sm" type="submit" disabled={uploading || !selectedFile} style={{ marginLeft: 'auto' }}>
-                    {uploading ? 'Uploading…' : 'Upload'}
-                  </button>
-                </div>
-                {assetCategory === 'Song Audio' && selectedFile && (
-                  <div className="analysis-status">
-                    {analyzing ? (
-                      <span className="analysis-status__scanning">Analyzing audio…</span>
-                    ) : detectedFeatures ? (
-                      <span className="analysis-status__result">
-                        Detected:{' '}
-                        {[detectedFeatures.key, detectedFeatures.bpm != null ? `${detectedFeatures.bpm} BPM` : null]
-                          .filter(Boolean).join(' · ') || 'No key/BPM detected'}
-                      </span>
-                    ) : null}
+              <div className="upload-mode-row">
+                <label className="field-label" htmlFor="upload-mode-select">Upload mode</label>
+                <select
+                  id="upload-mode-select"
+                  className="select"
+                  value={uploadMode}
+                  onChange={e => setUploadMode(e.target.value as 'file' | 'shotlist')}
+                >
+                  <option value="file">File Upload</option>
+                  <option value="shotlist">Shot List Link</option>
+                </select>
+              </div>
+
+              {uploadMode === 'file' ? (
+                <form className="form-stack" onSubmit={uploadAsset}>
+                  <div className="form-row">
+                    <input className="input" value={assetName} onChange={e => setAssetName(e.target.value)} placeholder="Asset name (optional)" />
+                    <select className="select" value={assetCategory} onChange={e => setAssetCategory(e.target.value as AssetCategory)}>
+                      {CATEGORY_ORDER.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                    </select>
+                    <input className="input" value={assetVersionGroup} onChange={e => setAssetVersionGroup(e.target.value)} placeholder="Version group (optional)" />
                   </div>
-                )}
-                {uploading && uploadProgress !== null && (
-                  <div className="upload-progress">
-                    <div className="upload-progress__bar" style={{ width: `${uploadProgress}%` }} />
-                    <span className="upload-progress__label">{uploadProgress}%</span>
+                  <div className="file-picker-row">
+                    <label className="btn btn-ghost btn-sm file-picker-label" htmlFor="asset-file-input">Choose file</label>
+                    <span className="file-picker-name">{selectedFile?.name ?? 'No file selected'}</span>
+                    <input
+                      id="asset-file-input"
+                      ref={fileInputRef}
+                      className="file-picker-hidden"
+                      type="file"
+                      onChange={e => setSelectedFile(e.target.files?.[0] ?? null)}
+                      required
+                    />
+                    <button className="btn btn-primary btn-sm" type="submit" disabled={uploading || !selectedFile} style={{ marginLeft: 'auto' }}>
+                      {uploading ? 'Uploading…' : 'Upload'}
+                    </button>
                   </div>
-                )}
-                {error && <p className="form-error">{error}</p>}
-              </form>
+                  {assetCategory === 'Song Audio' && selectedFile && (
+                    <div className="analysis-status">
+                      {analyzing ? (
+                        <span className="analysis-status__scanning">Analyzing audio…</span>
+                      ) : detectedFeatures ? (
+                        <span className="analysis-status__result">
+                          Detected:{' '}
+                          {[detectedFeatures.key, detectedFeatures.bpm != null ? `${detectedFeatures.bpm} BPM` : null]
+                            .filter(Boolean).join(' · ') || 'No key/BPM detected'}
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
+                  {uploading && uploadProgress !== null && (
+                    <div className="upload-progress">
+                      <div className="upload-progress__bar" style={{ width: `${uploadProgress}%` }} />
+                      <span className="upload-progress__label">{uploadProgress}%</span>
+                    </div>
+                  )}
+                  {error && <p className="form-error">{error}</p>}
+                </form>
+              ) : (
+                <div className="form-stack">
+                  <p className="shot-list-hint">
+                    Link a Google Doc as a collaborative shot list for this song.
+                    Anyone with the link can view or edit it directly in Google Docs.
+                  </p>
+                  <div className="form-row">
+                    <input
+                      className="input"
+                      type="url"
+                      value={shotListInput}
+                      onChange={e => setShotListInput(e.target.value)}
+                      placeholder="https://docs.google.com/document/d/…"
+                    />
+                    <button
+                      className="btn btn-primary btn-sm"
+                      type="button"
+                      onClick={saveShotList}
+                      disabled={savingShotList || !shotListInput.trim()}
+                      style={{ flexShrink: 0 }}
+                    >
+                      {savingShotList ? 'Saving…' : song.shotListUrl ? 'Update' : 'Save'}
+                    </button>
+                    {song.shotListUrl && (
+                      <button
+                        className="btn btn-danger btn-sm"
+                        type="button"
+                        onClick={removeShotList}
+                        style={{ flexShrink: 0 }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
+        {/* Shot list display — always visible when linked */}
         {/* Asset sections */}
         <div className="asset-sections">
           {CATEGORY_ORDER.map(category => {
@@ -752,13 +971,104 @@ export function SongWorkspacePage() {
 
                           <div className="smc-row__actions">
                             {asset.mediaKind === 'video' && asset.streamUrl && (
-                              <button className="btn btn-ghost btn-sm" type="button" onClick={() => setActiveVideoAsset(asset)}>Play</button>
+                              <button
+                                className="btn btn-ghost btn-icon"
+                                type="button"
+                                onClick={() => setActiveVideoAsset(asset)}
+                                aria-label="Play"
+                                title="Play"
+                              >
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                  <path d="M4 2.5v7l5-3.5-5-3.5Z" fill="currentColor"/>
+                                </svg>
+                              </button>
                             )}
                             {asset.downloadUrl && (
-                              <a className="btn btn-ghost btn-sm" href={resolveApiUrl(asset.downloadUrl)} target="_blank" rel="noreferrer">Download</a>
+                              <a
+                                className="btn btn-ghost btn-icon"
+                                href={resolveApiUrl(asset.downloadUrl)}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label="Download"
+                                title="Download"
+                              >
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                  <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                              </a>
                             )}
-                            <button className="btn btn-danger btn-sm" type="button" onClick={() => removeAsset(asset)}>Remove</button>
+                            <button
+                              className="btn btn-ghost btn-icon"
+                              type="button"
+                              onClick={() => startEditAsset(asset)}
+                              aria-label="Edit"
+                              title="Edit"
+                            >
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                <path d="M8.5 1.5l2 2L4 10H2V8L8.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                              </svg>
+                            </button>
+                            <button
+                              className="btn btn-danger btn-icon"
+                              type="button"
+                              onClick={() => removeAsset(asset)}
+                              aria-label="Remove"
+                              title="Remove"
+                            >
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                <path d="M2.5 3h7M4.5 3V2h3v1M5 5v4M7 5v4M3.5 3l.4 6.2a1 1 0 001 .8h1.2a1 1 0 001-.8L8 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            </button>
                           </div>
+
+                          {editingAssetId === asset.id && (
+                            <div className="asset-edit-form smc-row__edit">
+                              <div className="form-row">
+                                <input
+                                  className="input"
+                                  value={editAssetName}
+                                  onChange={e => setEditAssetName(e.target.value)}
+                                  placeholder="Asset name"
+                                />
+                                <select
+                                  className="select"
+                                  value={editAssetCategory}
+                                  onChange={e => setEditAssetCategory(e.target.value as AssetCategory)}
+                                >
+                                  {CATEGORY_ORDER.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                                </select>
+                                <input
+                                  className="input"
+                                  value={editAssetVersionGroup}
+                                  onChange={e => setEditAssetVersionGroup(e.target.value)}
+                                  placeholder="Version group"
+                                />
+                                <button
+                                  className="btn btn-primary btn-icon"
+                                  type="button"
+                                  onClick={() => saveAssetEdit(asset.id)}
+                                  disabled={savingAssetEdit || !editAssetName.trim()}
+                                  aria-label="Save"
+                                  title="Save"
+                                >
+                                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                    <path d="M2 6.5 4.5 9 10 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                                  </svg>
+                                </button>
+                                <button
+                                  className="btn btn-ghost btn-icon"
+                                  type="button"
+                                  onClick={() => setEditingAssetId(null)}
+                                  aria-label="Cancel"
+                                  title="Cancel"
+                                >
+                                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                    <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -781,6 +1091,75 @@ export function SongWorkspacePage() {
               </div>
             );
           })}
+
+          {song.shotListUrl && (() => {
+            const m = song.shotListUrl.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/);
+            const embedUrl = m ? `https://docs.google.com/document/d/${m[1]}/preview?embedded=true` : null;
+            return (
+              <div className="asset-section shot-list-section">
+                <p className="asset-section__label">
+                  Shot List
+                  <span className="asset-section__count">1</span>
+                </p>
+                <div className="card shot-list-card shot-list-card--in-assets">
+                  <div className="shot-list-link-row">
+                    <svg className="shot-list-doc-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                      <rect width="20" height="20" rx="3" fill="#4285F4" opacity="0.15"/>
+                      <path d="M5 5h6l4 4v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" stroke="#4285F4" strokeWidth="1.2" fill="none"/>
+                      <path d="M11 5v4h4" stroke="#4285F4" strokeWidth="1.2" strokeLinejoin="round" fill="none"/>
+                      <path d="M7 10h6M7 12h6M7 14h4" stroke="#4285F4" strokeWidth="1" strokeLinecap="round"/>
+                    </svg>
+                    <span className="shot-list-label">Google Doc</span>
+                    <div className="shot-list-link-actions">
+                      <a
+                        className="btn btn-primary btn-icon"
+                        href={song.shotListUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label="Open in Docs"
+                        title="Open in Docs"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                          <path d="M4 2.5h5.5V8M9.5 2.5 2.5 9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </a>
+                      <button
+                        className="btn btn-ghost btn-icon"
+                        type="button"
+                        onClick={() => { setUploadMode('shotlist'); setUploadOpen(true); setShotListInput(song.shotListUrl ?? ''); }}
+                        aria-label="Edit shot list link"
+                        title="Edit link"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                          <path d="M8.5 1.5l2 2L4 10H2V8L8.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-icon"
+                        type="button"
+                        onClick={() => setShotListEmbedOpen(open => !open)}
+                        aria-label={shotListEmbedOpen ? 'Collapse embed' : 'Expand embed'}
+                        title={shotListEmbedOpen ? 'Collapse embed' : 'Expand embed'}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                          <path d={shotListEmbedOpen ? 'M2.5 7.5 6 4l3.5 3.5' : 'M2.5 4.5 6 8l3.5-3.5'} stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  {embedUrl && shotListEmbedOpen && (
+                    <iframe
+                      src={embedUrl}
+                      className="shot-list-embed"
+                      title="Shot List"
+                      loading="lazy"
+                      allow=""
+                    />
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
 

@@ -256,7 +256,8 @@ const updateSongSchema = z.object({
   lyrics: z.string().max(100000).nullable().optional(),
   key: z.string().max(30).nullable().optional(),
   bpm: z.number().int().positive().max(400).nullable().optional(),
-  released: z.boolean().optional()
+  released: z.boolean().optional(),
+  shotListUrl: z.string().url().max(2048).nullable().optional()
 });
 
 songRouter.patch('/:songId', async (req, res) => {
@@ -291,6 +292,8 @@ songRouter.patch('/:songId', async (req, res) => {
   // Handle fields not yet reflected in the generated Prisma client via raw SQL.
   const rawUpdates: string[] = [];
   let releasedValue: boolean = Boolean((song as any).released);
+  let shotListUrlValue: string | null = (song as any).shotListUrl ?? null;
+
   if (parsed.data.released !== undefined) {
     rawUpdates.push(`"released" = ${parsed.data.released ? 'TRUE' : 'FALSE'}`);
     releasedValue = parsed.data.released;
@@ -310,9 +313,18 @@ songRouter.patch('/:songId', async (req, res) => {
     } catch { /* non-fatal */ }
   }
 
+  // shotListUrl uses a parameterized raw query to safely handle user-supplied URLs.
+  if (parsed.data.shotListUrl !== undefined) {
+    try {
+      const urlVal: string | null = parsed.data.shotListUrl;
+      await prisma.$executeRaw`UPDATE "Song" SET "shotListUrl" = ${urlVal} WHERE "id" = ${req.params.songId}`;
+      shotListUrlValue = urlVal;
+    } catch { /* non-fatal */ }
+  }
+
   // Build response from the update result — no extra round-trip needed.
-  // Merge the raw-SQL-applied `released` value we just set.
-  res.json(mapSongWorkspace(Object.assign({}, song, { released: releasedValue })));
+  // Merge the raw-SQL-applied values we just set.
+  res.json(mapSongWorkspace(Object.assign({}, song, { released: releasedValue, shotListUrl: shotListUrlValue })));
 });
 
 songRouter.delete('/:songId', async (req, res) => {

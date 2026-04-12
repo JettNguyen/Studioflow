@@ -98,3 +98,206 @@
 .song-row.dragging {
   opacity: 0.6;
 }
+
+/* ── Section headings ── */
+.section-heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin: 0 0 10px 0;
+}
+
+/* ── Project Files (misc assets) ── */
+.project-files {
+  margin-top: 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.project-files__header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.project-files__sub {
+  font-size: 12px;
+  color: var(--text-3);
+  margin: 0 0 6px 0;
+}
+
+/* Reuse the upload-toggle style from SongWorkspacePage —
+   we import it here with matching class names */
+.project-files .upload-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: none;
+  border: 1px solid var(--border-mid);
+  border-radius: var(--r-2);
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background-color 0.2s;
+  width: fit-content;
+}
+
+.project-files .upload-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.project-files .upload-toggle--open {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.project-files .upload-toggle__chevron {
+  margin-left: auto;
+  transition: transform 0.2s ease;
+  opacity: 0.5;
+}
+
+.project-files .upload-toggle--open .upload-toggle__chevron {
+  transform: rotate(180deg);
+}
+
+.misc-upload-card {
+  margin-top: 2px;
+}
+
+/* Upload progress bar (reused from workspace) */
+.project-files .upload-progress {
+  position: relative;
+  height: 5px;
+  background: var(--border-mid);
+  border-radius: 100px;
+  overflow: hidden;
+}
+
+.project-files .upload-progress__bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent);
+  border-radius: 100px;
+  transition: width 0.2s linear;
+}
+
+.project-files .upload-progress__label {
+  position: absolute;
+  right: 0;
+  top: -18px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* ── Misc asset list ── */
+.misc-asset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.misc-asset-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: var(--r-2);
+  border: 1px solid transparent;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.misc-asset-row:hover {
+  background: var(--surface-raised);
+  border-color: var(--border);
+}
+
+.misc-asset-row__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.misc-asset-row__name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.misc-asset-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.misc-asset-row__type,
+.misc-asset-row__size {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.misc-asset-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.misc-asset-edit-form {
+  width: 100%;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.misc-empty {
+  font-size: 13px;
+  color: var(--text-3);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+/* file-picker helpers (same as workspace) */
+.project-files .file-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.project-files .file-picker-hidden {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.project-files .file-picker-label {
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.project-files .file-picker-name {
+  font-size: 13px;
+  color: var(--text-3);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

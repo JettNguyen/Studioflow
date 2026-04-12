@@ -2,6 +2,8 @@ import type { OAuthAccount, Project, ProjectMembership, Song, Task, User } from 
 import type {
   AssetCategory,
   AuthUser,
+  ProjectAsset,
+  ProjectAssetCategory,
   ProjectDetails,
   ProjectSummary,
   ProjectSyncStatus,
@@ -68,6 +70,33 @@ function mapAssetCategory(category: string): AssetCategory {
   return 'Stems';
 }
 
+export function mapProjectAssetCategory(category: string): ProjectAssetCategory {
+  if (category === 'ShotList') return 'Shot List';
+  if (category === 'FilmingClip') return 'Filming Clip';
+  if (category === 'TrailerVersion') return 'Trailer Version';
+  if (category === 'TrailerAudio') return 'Trailer Audio';
+  return 'Other';
+}
+
+export function mapProjectAsset(
+  asset: { id: string; projectId: string; name: string; type: string; category: string; fileSizeBytes: number | null; storageKey: string | null; createdAt: Date }
+): ProjectAsset {
+  const isLink = Boolean(asset.storageKey?.startsWith('link:'));
+  const downloadUrl = isLink
+    ? asset.storageKey!.slice(5)
+    : `/api/projects/${asset.projectId}/assets/${asset.id}/download`;
+  return {
+    id: asset.id,
+    name: asset.name,
+    type: asset.type,
+    category: mapProjectAssetCategory(asset.category),
+    fileSizeBytes: asset.fileSizeBytes,
+    isLink,
+    downloadUrl,
+    createdAt: asset.createdAt.toISOString()
+  };
+}
+
 export function mapAuthUser(user: User & { oauthAccounts?: OAuthAccount[] }): AuthUser {
   const googleAccount = user.oauthAccounts?.find((account) => account.provider === 'google');
 
@@ -96,7 +125,7 @@ export function mapProjectSummary(
     genre: string;
     coverImageKey: string | null;
     driveSyncStatus: string;
-    _count: { songs: number; memberships: number };
+    _count: { songs: number; memberships: number; projectAssets: number };
     [k: string]: unknown;
   }
 ): ProjectSummary {
@@ -107,6 +136,7 @@ export function mapProjectSummary(
     genre: project.genre,
     released: Boolean(project.released),
     songCount: project._count.songs,
+    projectAssetCount: project._count.projectAssets,
     collaboratorCount: project._count.memberships,
     driveSyncStatus: mapSyncStatus(project.driveSyncStatus),
     coverImageUrl: project.coverImageKey ? `/api/projects/${project.id}/cover` : null
@@ -123,7 +153,7 @@ export function mapSongSummary(
     title: song.title,
     released: Boolean((song as any).released),
     status: song.status,
-    assetCount: song.assets.length,
+    assetCount: song.assets.length + ((song as any).shotListUrl ? 1 : 0),
     taskOpenCount: song.tasks.filter((task) => task.status !== 'Done').length
   };
 
@@ -133,6 +163,7 @@ export function mapSongSummary(
 export function mapProjectDetails(
   project: Project & {
     songs: Array<Song & { assets: Array<{ id: string }>; tasks: Task[] }>;
+    _count?: { projectAssets: number };
   }
 ): ProjectDetails {
   const out = {
@@ -141,6 +172,7 @@ export function mapProjectDetails(
     description: project.description,
     genre: project.genre,
     released: Boolean((project as any).released),
+    projectAssetCount: project._count?.projectAssets ?? 0,
     driveSyncStatus: mapSyncStatus(project.driveSyncStatus),
     driveFolderId: project.driveFolderId,
     coverImageUrl: project.coverImageKey ? `/api/projects/${project.id}/cover` : null,
@@ -184,6 +216,7 @@ export function mapSongWorkspace(
     lyrics: song.lyrics ?? null,
     key: song.keySignature ?? null,
     bpm: song.bpm ?? null,
+    shotListUrl: (song as any).shotListUrl ?? null,
     assets: song.assets.map((asset) => ({
       id: asset.id,
       name: asset.name,

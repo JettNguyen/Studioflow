@@ -20,6 +20,12 @@ const createAssetNoteSchema = z.object({
   body: z.string().min(1).max(4000)
 });
 
+const updateAssetSchema = z.object({
+  name: z.string().trim().min(1).max(255).optional(),
+  category: z.enum(['Song Audio', 'Social Media Content', 'Videos', 'Beat', 'Stems']).optional(),
+  versionGroup: z.string().trim().max(120).optional()
+});
+
 assetRouter.use(requireAuth);
 
 async function findAuthorizedAsset(assetId: string, userId: string) {
@@ -35,6 +41,25 @@ async function findAuthorizedAsset(assetId: string, userId: string) {
       }
     }
   });
+}
+
+function toPrismaAssetCategory(category: string) {
+  if (category === 'Song Audio') return 'SongAudio';
+  if (category === 'Social Media Content') return 'SocialMediaContent';
+  if (category === 'Videos') return 'Videos';
+  if (category === 'Beat') return 'Beat';
+  return 'Stems';
+}
+
+function slugifyVersionGroup(value: string) {
+  const slug = value
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .slice(0, 90);
+
+  return slug || 'asset';
 }
 
 assetRouter.get('/:assetId/stream', async (req, res) => {
@@ -233,6 +258,50 @@ assetRouter.delete('/:assetId', async (req, res) => {
   }
 
   res.status(204).send();
+});
+
+assetRouter.patch('/:assetId', async (req, res) => {
+  const parsed = updateAssetSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Invalid asset update payload', errors: parsed.error.flatten() });
+  }
+
+  const asset = await findAuthorizedAsset(req.params.assetId, req.user!.id);
+  if (!asset) {
+    return res.status(404).json({ message: 'Asset not found' });
+  }
+
+  const updates: Record<string, unknown> = {};
+
+  if (typeof parsed.data.name === 'string') {
+    updates.name = parsed.data.name;
+  }
+
+  if (typeof parsed.data.category === 'string') {
+    updates.category = toPrismaAssetCategory(parsed.data.category);
+  }
+
+  if (typeof parsed.data.versionGroup === 'string') {
+    updates.versionGroup = slugifyVersionGroup(parsed.data.versionGroup || asset.name);
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ message: 'No valid fields to update' });
+  }
+
+  const updated = await prisma.asset.update({
+    where: { id: asset.id },
+    data: updates
+  });
+
+  res.json({
+    id: updated.id,
+    name: updated.name,
+    category: parsed.data.category,
+    versionGroup: updated.versionGroup,
+    updatedAt: updated.updatedAt.toISOString()
+  });
 });
 
 assetRouter.post('/:assetId/notes', async (req, res) => {

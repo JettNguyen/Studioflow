@@ -208,7 +208,14 @@
 }
 
 .upload-form-card {
-  /* inherits .card */
+  margin-top: 8px;
+}
+
+.upload-mode-row {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+  max-width: 260px;
 }
 
 .file-picker-row {
@@ -301,7 +308,9 @@
 }
 
 .asset-card__head {
-  /* wrapper for title row */
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .asset-card__title-row {
@@ -380,19 +389,18 @@
 .asset-download-link {
   display: inline-flex;
   align-items: center;
-  height: 30px;
-  padding: 0 10px;
-  font-size: 13px;
-  color: var(--accent-text);
+  justify-content: center;
+  color: var(--text-2);
   text-decoration: none;
   border: 1px solid var(--border-mid);
   border-radius: var(--r-2);
-  transition: background-color 0.2s, color 0.2s;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
 }
 
 .asset-download-link:hover {
   background: var(--surface-hover);
   color: var(--text);
+  border-color: var(--border-strong);
 }
 
 .asset-notes-toggle.active {
@@ -408,6 +416,11 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.asset-edit-form {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
 }
 
 /* ── Image asset preview ── */
@@ -516,12 +529,11 @@
   align-items: center;
   gap: 5px;
   flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.2s;
 }
 
-.smc-row:hover .smc-row__actions {
-  opacity: 1;
+.smc-row__edit {
+  width: 100%;
+  margin-top: 10px;
 }
 
 /* ── Note lists ── */
@@ -694,6 +706,99 @@
   display: block;
 }
 
+/* ── Upload toggle — has-content dot ── */
+.upload-toggle--has-content {
+  color: var(--text);
+}
+
+.upload-toggle__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+/* ── Shot list card ── */
+.shot-list-card {
+  margin-top: 8px;
+}
+
+.shot-list-card--in-assets {
+  margin-top: 0;
+}
+
+.shot-list-hint {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.shot-list-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.shot-list-link-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.shot-list-doc-icon {
+  flex-shrink: 0;
+}
+
+.shot-list-url-text,
+.shot-list-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shot-list-link-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.shot-list-embed {
+  width: 100%;
+  height: 500px;
+  margin-top: 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+  background: #1a1a1a;
+  /* Invert the white Google Docs background to match the app's dark theme.
+     hue-rotate(180deg) corrects the colour shift from the inversion so text
+     and accents look natural rather than colour-inverted. */
+  filter: invert(1) hue-rotate(180deg) brightness(1.25) contrast(0.75);
+}
+
+@media (max-width: 900px) {
+  .shot-list-embed {
+    height: 320px;
+  }
+  .shot-list-link-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .shot-list-url-text {
+    width: 100%;
+  }
+}
+
 /* ── Responsive ── */
 @media (max-width: 900px) {
   .workspace {
@@ -704,7 +809,7 @@
     position: static;
   }
 
-  .smc-row__actions {
-    opacity: 1;
+  .upload-mode-row {
+    max-width: 100%;
   }
 }

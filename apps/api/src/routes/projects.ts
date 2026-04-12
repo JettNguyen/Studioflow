@@ -1,22 +1,36 @@
 import { Router } from 'express';
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream, existsSync, statSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
+import crypto from 'node:crypto';
 import { z } from 'zod';
 import type { CreateProjectRequest } from '@studioflow/shared';
 import { prisma } from '../lib/prisma.js';
 import { env } from '../config.js';
 import { requireAuth } from '../middleware/requireAuth.js';
-import { resolveStoredFilePath, uploadImage } from '../storage/localStorage.js';
+import { resolveStoredFilePath, upload, uploadImage } from '../storage/localStorage.js';
 import {
   buildS3ObjectKey,
   deleteS3Object,
   getS3Object,
   getS3ObjectWithLegacyFallback,
+  getS3ObjectWithRangeLegacyFallback,
   isS3StorageKey,
   uploadFileToS3
 } from '../storage/s3Storage.js';
 import { createDriveFolder, ensureStudioflowProjectFolder } from '../utils/drive.js';
-import { mapProjectDetails, mapProjectSummary } from '../utils/mappers.js';
+import { mapProjectAsset, mapProjectDetails, mapProjectSummary } from '../utils/mappers.js';
+
+type RawProjectAsset = {
+  id: string;
+  projectId: string;
+  name: string;
+  type: string;
+  category: string;
+  fileSizeBytes: number | null;
+  storageKey: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 export const projectRouter = Router();
 const paramToString = (v: string | string[] | undefined) => Array.isArray(v) ? v[0] : (v ?? '');
@@ -41,7 +55,7 @@ projectRouter.get('/', async (req, res) => {
           released: true,
           coverImageKey: true,
           driveSyncStatus: true,
-          _count: { select: { songs: true, memberships: true } }
+          _count: { select: { songs: true, memberships: true, projectAssets: true } }
         }
       }
     },
@@ -86,7 +100,8 @@ projectRouter.post('/', async (req, res) => {
           assets: { select: { id: true } },
           tasks: true
         }
-      }
+      },
+      _count: { select: { projectAssets: true } }
     }
   });
 
@@ -120,7 +135,8 @@ projectRouter.get('/:projectId', async (req, res) => {
           tasks: true
         },
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }]
-      }
+      },
+      _count: { select: { projectAssets: true } }
     }
   });
 
@@ -165,13 +181,19 @@ projectRouter.patch('/:projectId', async (req, res) => {
   if (Object.keys(updates).length === 0) {
     project = await prisma.project.findUnique({
       where: { id: paramToString(req.params.projectId) },
-      include: { songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] } }
+      include: {
+        songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
+        _count: { select: { projectAssets: true } }
+      }
     });
   } else {
     project = await prisma.project.update({
       where: { id: paramToString(req.params.projectId) },
       data: updates,
-      include: { songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] } }
+      include: {
+        songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
+        _count: { select: { projectAssets: true } }
+      }
     });
   }
 
@@ -284,7 +306,10 @@ projectRouter.post('/:projectId/sync-drive', async (req, res) => {
   const updated = await prisma.project.update({
     where: { id: paramToString(req.params.projectId) },
     data: { driveFolderId, driveSyncStatus },
-    include: { songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] } }
+    include: {
+      songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
+      _count: { select: { projectAssets: true } }
+    }
   });
 
   res.json(mapProjectDetails(updated));
@@ -318,7 +343,10 @@ projectRouter.post('/:projectId/songs/reorder', async (req, res) => {
   // Return updated project
   const project = await prisma.project.findUnique({
     where: { id: paramToString(req.params.projectId) },
-    include: { songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [ { position: 'asc' }, { createdAt: 'asc' } ] } }
+    include: {
+      songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [ { position: 'asc' }, { createdAt: 'asc' } ] },
+      _count: { select: { projectAssets: true } }
+    }
   });
 
   if (!project) return res.status(404).json({ message: 'Project not found after reorder' });
@@ -410,7 +438,10 @@ projectRouter.post('/:projectId/cover', uploadImage.single('image'), async (req,
   const updated = await prisma.project.update({
     where: { id: paramToString(req.params.projectId) },
     data: { coverImageKey: storageKey },
-    include: { songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] } }
+    include: {
+      songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
+      _count: { select: { projectAssets: true } }
+    }
   });
 
   res.json(mapProjectDetails(updated));
@@ -436,4 +467,305 @@ projectRouter.delete('/:projectId/cover', async (req, res) => {
 
   await prisma.project.update({ where: { id: paramToString(req.params.projectId) }, data: { coverImageKey: null } });
   res.status(204).send();
+});
+
+// ── Project Assets (Misc / non-song files) ────────────────────────────────────
+
+const PROJECT_ASSET_CATEGORIES = ['Shot List', 'Filming Clip', 'Trailer Version', 'Trailer Audio', 'Other'] as const;
+
+const updateProjectAssetSchema = z.object({
+  name: z.string().trim().min(1).max(255).optional(),
+  category: z.enum(PROJECT_ASSET_CATEGORIES).optional(),
+  linkUrl: z.string().trim().url().optional()
+});
+
+function toPrismaProjectAssetCategory(category: string): string {
+  if (category === 'Shot List') return 'ShotList';
+  if (category === 'Filming Clip') return 'FilmingClip';
+  if (category === 'Trailer Version') return 'TrailerVersion';
+  if (category === 'Trailer Audio') return 'TrailerAudio';
+  return 'Misc';
+}
+
+// List project misc assets
+projectRouter.get('/:projectId/assets', async (req, res) => {
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  const assets = await prisma.$queryRaw<RawProjectAsset[]>`
+    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    FROM "ProjectAsset"
+    WHERE "projectId" = ${paramToString(req.params.projectId)}
+    ORDER BY "createdAt" DESC
+  `;
+
+  res.json(assets.map(mapProjectAsset));
+});
+
+// Create a link-type project asset (no file — stores a URL, e.g. a Google Docs shot list)
+projectRouter.post('/:projectId/assets/link', async (req, res) => {
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  const projectId = paramToString(req.params.projectId);
+  const rawCategory = typeof req.body.category === 'string' ? req.body.category : 'Other';
+  const category = PROJECT_ASSET_CATEGORIES.includes(rawCategory as typeof PROJECT_ASSET_CATEGORIES[number])
+    ? rawCategory
+    : 'Other';
+  const prismaCategory = toPrismaProjectAssetCategory(category);
+
+  const linkUrl = typeof req.body.linkUrl === 'string' ? req.body.linkUrl.trim() : '';
+  if (!linkUrl) return res.status(400).json({ message: 'linkUrl is required' });
+
+  // Basic URL validation
+  try { new URL(linkUrl); } catch {
+    return res.status(400).json({ message: 'linkUrl must be a valid URL' });
+  }
+
+  const assetName = (typeof req.body.name === 'string' && req.body.name.trim())
+    ? req.body.name.trim()
+    : 'Shot List';
+
+  const storageKey = `link:${linkUrl}`;
+  const id = crypto.randomUUID();
+  const now = new Date();
+
+  await prisma.$executeRaw`
+    INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt")
+    VALUES (
+      ${id},
+      ${projectId},
+      ${assetName},
+      ${'text/uri-list'},
+      ${prismaCategory}::"ProjectAssetCategory",
+      ${null},
+      ${storageKey},
+      ${now},
+      ${now}
+    )
+  `;
+
+  const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
+    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    FROM "ProjectAsset" WHERE id = ${id}
+  `;
+
+  res.status(201).json(mapProjectAsset(created));
+});
+
+// Upload a project misc asset
+projectRouter.post('/:projectId/assets', upload.single('file'), async (req, res) => {
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+  if (!req.file) return res.status(400).json({ message: 'No file provided' });
+
+  const projectId = paramToString(req.params.projectId);
+  const rawCategory = typeof req.body.category === 'string' ? req.body.category : 'Other';
+  const category = PROJECT_ASSET_CATEGORIES.includes(rawCategory as typeof PROJECT_ASSET_CATEGORIES[number])
+    ? rawCategory
+    : 'Other';
+  const prismaCategory = toPrismaProjectAssetCategory(category);
+
+  const assetName = (typeof req.body.name === 'string' && req.body.name.trim())
+    ? req.body.name.trim()
+    : req.file.originalname;
+
+  const localFilePath = resolveStoredFilePath(req.file.filename);
+  let storageKey: string | null = req.file.filename;
+  const fileSizeBytes = req.file.size ?? null;
+
+  try {
+    if (env.s3Enabled) {
+      const s3Key = buildS3ObjectKey({ userId: req.user!.id, songId: projectId, fileName: req.file.originalname });
+      storageKey = await uploadFileToS3({ localFilePath, objectKey: s3Key, contentType: req.file.mimetype });
+      await unlink(localFilePath).catch(() => undefined);
+    }
+  } catch {
+    await unlink(localFilePath).catch(() => undefined);
+    return res.status(500).json({ message: 'Failed to store file' });
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date();
+
+  await prisma.$executeRaw`
+    INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt")
+    VALUES (
+      ${id},
+      ${projectId},
+      ${assetName},
+      ${req.file.mimetype},
+      ${prismaCategory}::"ProjectAssetCategory",
+      ${fileSizeBytes},
+      ${storageKey},
+      ${now},
+      ${now}
+    )
+  `;
+
+  const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
+    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    FROM "ProjectAsset" WHERE id = ${id}
+  `;
+
+  res.status(201).json(mapProjectAsset(created));
+});
+
+// Download a project misc asset
+projectRouter.get('/:projectId/assets/:assetId/download', async (req, res) => {
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
+    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    FROM "ProjectAsset"
+    WHERE id = ${paramToString(req.params.assetId)}
+      AND "projectId" = ${paramToString(req.params.projectId)}
+  `;
+
+  if (!asset || !asset.storageKey) return res.status(404).json({ message: 'Asset not found' });
+
+  // Link-type asset — redirect to the stored URL
+  if (asset.storageKey.startsWith('link:')) {
+    return res.redirect(asset.storageKey.slice(5));
+  }
+
+  const encodedName = encodeURIComponent(asset.name);
+  res.setHeader('Content-Disposition', `attachment; filename="${encodedName}"; filename*=UTF-8''${encodedName}`);
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+
+  if (isS3StorageKey(asset.storageKey) || env.s3Enabled) {
+    try {
+      const { object } = await getS3ObjectWithRangeLegacyFallback(asset.storageKey, undefined);
+      res.setHeader('Content-Type', object.ContentType || asset.type || 'application/octet-stream');
+      if (typeof object.ContentLength === 'number') {
+        res.setHeader('Content-Length', object.ContentLength.toString());
+      }
+      (object.Body as NodeJS.ReadableStream).pipe(res);
+      return;
+    } catch {
+      if (isS3StorageKey(asset.storageKey)) {
+        return res.status(404).json({ message: 'File not found in storage' });
+      }
+    }
+  }
+
+  const fullPath = resolveStoredFilePath(asset.storageKey);
+  if (!existsSync(fullPath)) return res.status(404).json({ message: 'File not found' });
+
+  res.setHeader('Content-Type', asset.type || 'application/octet-stream');
+  try {
+    const stat = statSync(fullPath);
+    res.setHeader('Content-Length', stat.size.toString());
+  } catch { /* non-fatal */ }
+  createReadStream(fullPath).pipe(res);
+});
+
+// Delete a project misc asset
+projectRouter.delete('/:projectId/assets/:assetId', async (req, res) => {
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
+    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    FROM "ProjectAsset"
+    WHERE id = ${paramToString(req.params.assetId)}
+      AND "projectId" = ${paramToString(req.params.projectId)}
+  `;
+
+  if (!asset) return res.status(404).json({ message: 'Asset not found' });
+
+  // Delete stored file
+  if (asset.storageKey) {
+    try {
+      if (isS3StorageKey(asset.storageKey)) {
+        await deleteS3Object(asset.storageKey);
+      } else {
+        const fullPath = resolveStoredFilePath(asset.storageKey);
+        if (existsSync(fullPath)) await unlink(fullPath).catch(() => undefined);
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  await prisma.$executeRaw`DELETE FROM "ProjectAsset" WHERE id = ${asset.id}`;
+
+  res.status(204).send();
+});
+
+// Update a project misc asset (name/category/link URL)
+projectRouter.patch('/:projectId/assets/:assetId', async (req, res) => {
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  const parsed = updateProjectAssetSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Invalid asset update payload', errors: parsed.error.flatten() });
+  }
+
+  const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
+    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    FROM "ProjectAsset"
+    WHERE id = ${paramToString(req.params.assetId)}
+      AND "projectId" = ${paramToString(req.params.projectId)}
+  `;
+
+  if (!asset) return res.status(404).json({ message: 'Asset not found' });
+
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
+
+  if (typeof parsed.data.name === 'string') {
+    updates.push(`name = $${idx++}`);
+    values.push(parsed.data.name);
+  }
+
+  if (typeof parsed.data.category === 'string') {
+    updates.push(`category = $${idx++}::"ProjectAssetCategory"`);
+    values.push(toPrismaProjectAssetCategory(parsed.data.category));
+  }
+
+  if (typeof parsed.data.linkUrl === 'string') {
+    if (!asset.storageKey?.startsWith('link:')) {
+      return res.status(400).json({ message: 'linkUrl can only be updated for link assets' });
+    }
+    updates.push(`"storageKey" = $${idx++}`);
+    values.push(`link:${parsed.data.linkUrl}`);
+  }
+
+  if (!updates.length) {
+    return res.status(400).json({ message: 'No valid fields to update' });
+  }
+
+  updates.push(`"updatedAt" = NOW()`);
+
+  await prisma.$executeRawUnsafe(
+    `UPDATE "ProjectAsset" SET ${updates.join(', ')} WHERE id = $${idx} AND "projectId" = $${idx + 1}`,
+    ...values,
+    paramToString(req.params.assetId),
+    paramToString(req.params.projectId)
+  );
+
+  const [updated] = await prisma.$queryRaw<RawProjectAsset[]>`
+    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    FROM "ProjectAsset"
+    WHERE id = ${paramToString(req.params.assetId)}
+      AND "projectId" = ${paramToString(req.params.projectId)}
+  `;
+
+  if (!updated) return res.status(404).json({ message: 'Asset not found after update' });
+
+  res.json(mapProjectAsset(updated));
 });

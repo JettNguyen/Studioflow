@@ -6,8 +6,10 @@ import { faCamera } from '@fortawesome/free-solid-svg-icons';
 import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
 import './DashboardPage.css';
 
+type ProjectSummaryWithAssetCount = ProjectSummary & { projectAssetCount: number };
+
 interface ProjectCardProps {
-  project: ProjectSummary;
+  project: ProjectSummaryWithAssetCount;
   onCoverUpload?: (file: File) => void;
 }
 
@@ -70,6 +72,7 @@ function ProjectCard({ project, onCoverUpload }: ProjectCardProps) {
         {project.description ? <p>{project.description}</p> : null}
         <div className="project-card__footer">
           <span className="project-card__stat">{project.songCount} {project.songCount === 1 ? 'song' : 'songs'}</span>
+          <span className="project-card__stat">{project.projectAssetCount} {project.projectAssetCount === 1 ? 'project file' : 'project files'}</span>
         </div>
       </Link>
 
@@ -91,7 +94,7 @@ function ProjectCard({ project, onCoverUpload }: ProjectCardProps) {
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projects, setProjects] = useState<ProjectSummaryWithAssetCount[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState('');
@@ -100,7 +103,7 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiRequest<ProjectSummary[]>('/projects')
+    apiRequest<ProjectSummaryWithAssetCount[]>('/projects')
       .then(setProjects)
       .catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : 'Unable to load projects');
