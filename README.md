@@ -1,7 +1,7 @@
 # [Studioflow](https://studioflow-music.vercel.app)
 
 <p align="center">
-  <a href="https://studioflow-music.vercel.app"><img src="apps/web/public/icon-512.png" alt="Studioflow logo" width="128" /></a>
+  <a href="https://studioflow-music.vercel.app"><img src="apps/web/public/icon-512.svg" alt="Studioflow logo" width="128" /></a>
 </p>
 
 Studioflow is a simple, fast, and collaborative web app for music creators, including producers, vocalists, and collaborators, to work together on songs, share ideas, and manage project assets.
