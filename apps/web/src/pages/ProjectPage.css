@@ -114,7 +114,7 @@
   margin-top: 36px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
 }
 
 .project-files__header {
@@ -202,22 +202,29 @@
   display: flex;
   flex-direction: column;
   gap: 0;
+  padding: 4px 6px;
 }
 
 .misc-asset-row {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px 12px;
+  flex-direction: column;
   border-radius: var(--r-2);
   border: 1px solid transparent;
-  transition: background-color 0.2s, border-color 0.2s;
+  transition: background-color 0.15s, border-color 0.15s;
 }
 
-.misc-asset-row:hover {
+.misc-asset-row:hover,
+.misc-asset-row--previewing {
   background: var(--surface-raised);
   border-color: var(--border);
+}
+
+.misc-asset-row__main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  flex-wrap: wrap;
 }
 
 .misc-asset-row__info {
@@ -260,7 +267,7 @@
 .misc-asset-edit-form {
   width: 100%;
   border-top: 1px solid var(--border);
-  padding-top: 10px;
+  padding: 10px 10px 6px;
 }
 
 .misc-empty {
@@ -274,34 +281,50 @@
 .misc-folder {
   display: flex;
   flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* Wrapper that holds the toggle button + action buttons in one bar */
+.misc-folder__header-wrap {
+  display: flex;
+  align-items: stretch;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border);
+}
+
+/* When collapsed the border-bottom should go away */
+.misc-folder--collapsed .misc-folder__header-wrap {
+  border-bottom: none;
 }
 
 .misc-folder__header {
   display: flex;
   align-items: center;
-  gap: 7px;
-  width: 100%;
+  gap: 8px;
+  flex: 1;
   background: none;
   border: none;
-  border-radius: var(--r-2);
-  padding: 7px 10px;
+  padding: 9px 12px;
   cursor: pointer;
-  color: var(--text-2);
+  color: var(--text);
   font-size: 13px;
   font-weight: 600;
-  transition: background-color 0.15s, color 0.15s;
   text-align: left;
+  transition: background-color 0.15s;
+  min-width: 0;
 }
 
 .misc-folder__header:hover {
   background: var(--surface-hover);
-  color: var(--text);
 }
 
 .misc-folder__chevron {
   flex-shrink: 0;
   transition: transform 0.2s ease;
-  opacity: 0.5;
+  color: var(--text-3);
 }
 
 .misc-folder__chevron--collapsed {
@@ -310,40 +333,30 @@
 
 .misc-folder__name {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .misc-folder__count {
   font-size: 11px;
   font-weight: 500;
   color: var(--text-3);
-  background: var(--surface-raised);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1px 7px;
-}
-
-/* Wrapper that holds the collapsible header + action buttons side-by-side */
-.misc-folder__header-wrap {
-  display: flex;
-  align-items: center;
-}
-
-.misc-folder__header-wrap .misc-folder__header {
-  flex: 1;
+  flex-shrink: 0;
 }
 
 .misc-folder__header-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
-  opacity: 0;
-  transition: opacity 0.15s;
+  gap: 0;
   flex-shrink: 0;
-  padding-right: 4px;
-}
-
-.misc-folder:hover .misc-folder__header-actions {
-  opacity: 1;
+  padding: 0 6px;
+  border-left: 1px solid var(--border);
 }
 
 /* Inline rename row */
@@ -351,7 +364,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 6px 10px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border);
 }
 
 .misc-folder__rename-input {
@@ -419,5 +434,35 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── Asset preview panel ── */
+.misc-asset-preview {
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+}
+
+.misc-asset-preview__video {
+  width: 100%;
+  border-radius: var(--r-2);
+  background: #000;
+  display: block;
+  max-height: 320px;
+}
+
+.misc-asset-preview__image {
+  width: 100%;
+  border-radius: var(--r-2);
+  object-fit: contain;
+  max-height: 320px;
+  display: block;
+  background: var(--surface);
+}
+
+/* Active state for the preview toggle button */
+.btn-ghost--active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 

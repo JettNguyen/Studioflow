@@ -5,7 +5,15 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPencil, faCheck, faXmark, faTrash } from '@fortawesome/free-solid-svg-icons';
 import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
 import { Breadcrumb } from '../components/Breadcrumb';
+import { WaveformPlayer } from '../components/WaveformPlayer';
 import './ProjectPage.css';
+
+function getMediaKind(type: string): 'audio' | 'video' | 'image' | 'other' {
+  if (type.startsWith('audio/')) return 'audio';
+  if (type.startsWith('video/')) return 'video';
+  if (type.startsWith('image/')) return 'image';
+  return 'other';
+}
 
 const PROJECT_ASSET_CATEGORY_SUGGESTIONS = [
   'Shot List', 'Filming Clip', 'Trailer Version', 'Trailer Audio', 'Other'
@@ -73,6 +81,7 @@ export function ProjectPage() {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   const [renamingFolderValue, setRenamingFolderValue] = useState('');
+  const [previewingAssetId, setPreviewingAssetId] = useState<string | null>(null);
   const miscFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const toggleFolder = (folder: string) => {
@@ -696,7 +705,7 @@ export function ProjectPage() {
             (acc[a.category] ??= []).push(a); return acc;
           }, {})
         ).map(([folder, folderAssets]) => (
-          <div key={folder} className="misc-folder">
+          <div key={folder} className={`misc-folder${collapsedFolders.has(folder) ? ' misc-folder--collapsed' : ''}`}>
             {renamingFolder === folder ? (
               <div className="misc-folder__rename-row">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ flexShrink: 0, opacity: 0.5 }}>
@@ -739,7 +748,7 @@ export function ProjectPage() {
                       className="btn btn-ghost btn-icon"
                       type="button"
                       onClick={() => downloadFolder(folderAssets)}
-                      title="Download all files in folder"
+                      title="Download all"
                     >
                       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                         <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -759,62 +768,111 @@ export function ProjectPage() {
             )}
             {!collapsedFolders.has(folder) && (
               <ul className="misc-asset-list">
-                {folderAssets.map(asset => (
-                  <li key={asset.id} className="misc-asset-row">
-                    {asset.isLink && (
-                      <svg className="misc-asset-row__link-icon" width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
-                        <rect width="20" height="20" rx="3" fill="#4285F4" opacity="0.15"/>
-                        <path d="M5 5h6l4 4v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" stroke="#4285F4" strokeWidth="1.2" fill="none"/>
-                        <path d="M11 5v4h4" stroke="#4285F4" strokeWidth="1.2" strokeLinejoin="round" fill="none"/>
-                        <path d="M7 10h6M7 12h6M7 14h4" stroke="#4285F4" strokeWidth="1" strokeLinecap="round"/>
-                      </svg>
-                    )}
-                    <div className="misc-asset-row__info">
-                      <span className="misc-asset-row__name">{asset.name}</span>
-                      <div className="misc-asset-row__meta">
-                        {!asset.isLink && asset.type && <span className="misc-asset-row__type">{fmtFileType(asset.type)}</span>}
-                        {!asset.isLink && asset.fileSizeBytes && (
-                          <span className="misc-asset-row__size">{fmtFileBytes(asset.fileSizeBytes)}</span>
+                {folderAssets.map(asset => {
+                  const mediaKind = asset.isLink ? 'other' : getMediaKind(asset.type);
+                  const previewable = mediaKind === 'audio' || mediaKind === 'video' || mediaKind === 'image';
+                  const isPreviewing = previewingAssetId === asset.id;
+                  const assetSrc = resolveApiUrl(asset.downloadUrl);
+                  return (
+                  <li key={asset.id} className={`misc-asset-row${isPreviewing ? ' misc-asset-row--previewing' : ''}`}>
+                    <div className="misc-asset-row__main">
+                      {asset.isLink && (
+                        <svg className="misc-asset-row__link-icon" width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+                          <rect width="20" height="20" rx="3" fill="#4285F4" opacity="0.15"/>
+                          <path d="M5 5h6l4 4v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" stroke="#4285F4" strokeWidth="1.2" fill="none"/>
+                          <path d="M11 5v4h4" stroke="#4285F4" strokeWidth="1.2" strokeLinejoin="round" fill="none"/>
+                          <path d="M7 10h6M7 12h6M7 14h4" stroke="#4285F4" strokeWidth="1" strokeLinecap="round"/>
+                        </svg>
+                      )}
+                      <div className="misc-asset-row__info">
+                        <span className="misc-asset-row__name">{asset.name}</span>
+                        <div className="misc-asset-row__meta">
+                          {!asset.isLink && asset.type && <span className="misc-asset-row__type">{fmtFileType(asset.type)}</span>}
+                          {!asset.isLink && asset.fileSizeBytes && (
+                            <span className="misc-asset-row__size">{fmtFileBytes(asset.fileSizeBytes)}</span>
+                          )}
+                          {asset.isLink && <span className="misc-asset-row__type">Link</span>}
+                        </div>
+                      </div>
+                      <div className="misc-asset-row__actions">
+                        {previewable && (
+                          <button
+                            className={`btn btn-ghost btn-icon${isPreviewing ? ' btn-ghost--active' : ''}`}
+                            type="button"
+                            onClick={() => setPreviewingAssetId(isPreviewing ? null : asset.id)}
+                            aria-label={isPreviewing ? 'Close preview' : 'Preview'}
+                            title={isPreviewing ? 'Close preview' : 'Preview'}
+                          >
+                            {isPreviewing ? (
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                              </svg>
+                            ) : (
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                <path d="M1 6C1 6 3 2.5 6 2.5S11 6 11 6 9 9.5 6 9.5 1 6 1 6z" stroke="currentColor" strokeWidth="1.2"/>
+                                <circle cx="6" cy="6" r="1.5" stroke="currentColor" strokeWidth="1.2"/>
+                              </svg>
+                            )}
+                          </button>
                         )}
-                        {asset.isLink && <span className="misc-asset-row__type">Google Doc</span>}
+                        <a
+                          className="btn btn-ghost btn-icon"
+                          href={asset.isLink ? asset.downloadUrl : assetSrc}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={asset.isLink ? 'Open link' : 'Download'}
+                          title={asset.isLink ? 'Open link' : 'Download'}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            {asset.isLink ? (
+                              <path d="M4 2.5h5.5V8M9.5 2.5 2.5 9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                            ) : (
+                              <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                            )}
+                          </svg>
+                        </a>
+                        <button
+                          className="btn btn-ghost btn-icon"
+                          type="button"
+                          onClick={() => startEditMiscAsset(asset)}
+                          aria-label="Edit"
+                          title="Edit"
+                        >
+                          <FontAwesomeIcon icon={faPencil} />
+                        </button>
+                        <button
+                          className="btn btn-danger btn-icon"
+                          type="button"
+                          onClick={() => deleteMiscAsset(asset.id, asset.name)}
+                          aria-label="Remove"
+                          title="Remove"
+                        >
+                          <FontAwesomeIcon icon={faTrash} />
+                        </button>
                       </div>
                     </div>
-                    <div className="misc-asset-row__actions">
-                      <a
-                        className="btn btn-ghost btn-icon"
-                        href={asset.isLink ? asset.downloadUrl : resolveApiUrl(asset.downloadUrl)}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={asset.isLink ? 'Open link' : 'Download file'}
-                        title={asset.isLink ? 'Open link' : 'Download file'}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                          {asset.isLink ? (
-                            <path d="M4 2.5h5.5V8M9.5 2.5 2.5 9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                          ) : (
-                            <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                          )}
-                        </svg>
-                      </a>
-                      <button
-                        className="btn btn-ghost btn-icon"
-                        type="button"
-                        onClick={() => startEditMiscAsset(asset)}
-                        aria-label="Edit project file"
-                        title="Edit"
-                      >
-                        <FontAwesomeIcon icon={faPencil} />
-                      </button>
-                      <button
-                        className="btn btn-danger btn-icon"
-                        type="button"
-                        onClick={() => deleteMiscAsset(asset.id, asset.name)}
-                        aria-label="Remove project file"
-                        title="Remove"
-                      >
-                        <FontAwesomeIcon icon={faTrash} />
-                      </button>
-                    </div>
+                    {isPreviewing && (
+                      <div className="misc-asset-preview">
+                        {mediaKind === 'audio' && (
+                          <WaveformPlayer src={assetSrc} />
+                        )}
+                        {mediaKind === 'video' && (
+                          <video
+                            className="misc-asset-preview__video"
+                            src={assetSrc}
+                            controls
+                            playsInline
+                          />
+                        )}
+                        {mediaKind === 'image' && (
+                          <img
+                            className="misc-asset-preview__image"
+                            src={assetSrc}
+                            alt={asset.name}
+                          />
+                        )}
+                      </div>
+                    )}
                     {editingMiscAssetId === asset.id && (
                       <div className="misc-asset-edit-form">
                         <div className="form-row">
@@ -863,7 +921,8 @@ export function ProjectPage() {
                       </div>
                     )}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </div>

@@ -112,6 +112,15 @@ export function SongWorkspacePage() {
   const [lyricsDraft, setLyricsDraft] = useState('');
   const [savingLyrics, setSavingLyrics] = useState(false);
 
+  // Collapsible asset sections
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const toggleSection = (section: string) =>
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(section)) next.delete(section); else next.add(section);
+      return next;
+    });
+
   // Per-asset notes
   const [assetNoteDrafts, setAssetNoteDrafts] = useState<Record<string, string>>({});
   const [openAssetNotes, setOpenAssetNotes] = useState<Set<string>>(new Set());
@@ -961,13 +970,22 @@ export function SongWorkspacePage() {
           {CATEGORY_ORDER.map(category => {
             if (category === 'Social Media Content') {
               if (!smcAssets.length) return null;
+              const isCollapsed = collapsedSections.has('Social Media Content');
               return (
-                <div key="Social Media Content" className="asset-section">
-                  <p className="asset-section__label">
+                <div key="Social Media Content" className={`asset-section${isCollapsed ? ' asset-section--collapsed' : ''}`}>
+                  <button
+                    className="asset-section__label"
+                    type="button"
+                    onClick={() => toggleSection('Social Media Content')}
+                    aria-expanded={!isCollapsed}
+                  >
+                    <svg className={`asset-section__chevron${isCollapsed ? ' asset-section__chevron--collapsed' : ''}`} width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+                      <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
                     Social Media Content
                     <span className="asset-section__count">{smcAssets.length}</span>
-                  </p>
-                  <div className="smc-list">
+                  </button>
+                  {!isCollapsed && <div className="smc-list">
                     {smcAssets.map(asset => {
                       const isImg = asset.mediaKind === 'other' && asset.type.startsWith('image/');
                       return (
@@ -1105,22 +1123,33 @@ export function SongWorkspacePage() {
                         </div>
                       );
                     })}
-                  </div>
+                  </div>}
                 </div>
               );
             }
 
             const section = groupedSections.find(s => s.category === category);
             if (!section?.groups.length) return null;
+            const isCollapsed = collapsedSections.has(category);
             return (
-              <div key={category} className="asset-section">
-                <p className="asset-section__label">
+              <div key={category} className={`asset-section${isCollapsed ? ' asset-section--collapsed' : ''}`}>
+                <button
+                  className="asset-section__label"
+                  type="button"
+                  onClick={() => toggleSection(category)}
+                  aria-expanded={!isCollapsed}
+                >
+                  <svg className={`asset-section__chevron${isCollapsed ? ' asset-section__chevron--collapsed' : ''}`} width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+                    <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
                   {category}
                   <span className="asset-section__count">{section.groups.length}</span>
-                </p>
-                <div className="asset-grid">
-                  {section.groups.map(group => renderVersionedCard(`${category}::${group.groupKey}`, group))}
-                </div>
+                </button>
+                {!isCollapsed && (
+                  <div className="asset-grid">
+                    {section.groups.map(group => renderVersionedCard(`${category}::${group.groupKey}`, group))}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1128,13 +1157,22 @@ export function SongWorkspacePage() {
           {song.shotListUrl && (() => {
             const m = song.shotListUrl.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/);
             const embedUrl = m ? `https://docs.google.com/document/d/${m[1]}/preview?embedded=true` : null;
+            const isCollapsed = collapsedSections.has('Shot List');
             return (
-              <div className="asset-section shot-list-section">
-                <p className="asset-section__label">
+              <div className={`asset-section shot-list-section${isCollapsed ? ' asset-section--collapsed' : ''}`}>
+                <button
+                  className="asset-section__label"
+                  type="button"
+                  onClick={() => toggleSection('Shot List')}
+                  aria-expanded={!isCollapsed}
+                >
+                  <svg className={`asset-section__chevron${isCollapsed ? ' asset-section__chevron--collapsed' : ''}`} width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+                    <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
                   Shot List
                   <span className="asset-section__count">1</span>
-                </p>
-                <div className="card shot-list-card shot-list-card--in-assets">
+                </button>
+                {!isCollapsed && <div className="card shot-list-card shot-list-card--in-assets">
                   <div className="shot-list-link-row">
                     <svg className="shot-list-doc-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                       <rect width="20" height="20" rx="3" fill="#4285F4" opacity="0.15"/>
@@ -1189,7 +1227,7 @@ export function SongWorkspacePage() {
                       allow=""
                     />
                   )}
-                </div>
+                </div>}
               </div>
             );
           })()}
