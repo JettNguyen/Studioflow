@@ -86,6 +86,39 @@ export async function ensureStudioflowProjectFolder(account: OAuthAccount, proje
   return findOrCreateDriveFolder(account, projectTitle, studioflowRootFolderId);
 }
 
+/**
+ * Maps a song asset category label to a human-readable Drive folder name.
+ * Categories without a dedicated folder (e.g. 'Other') return null — files
+ * go directly in the song folder.
+ */
+function categoryToDriveFolderName(category: string): string | null {
+  switch (category) {
+    case 'Song Audio': return 'Song Audio';
+    case 'Stems':      return 'Stems';
+    case 'Beat':       return 'Beat';
+    case 'Videos':     return 'Videos';
+    case 'Social Media Content': return 'Social Media Content';
+    default:           return null;
+  }
+}
+
+/**
+ * Returns the Drive folder ID for the given asset category inside a song's
+ * Drive folder, creating the subfolder if it doesn't exist yet.
+ * Returns the song's root Drive folder ID when no dedicated subfolder is
+ * needed (e.g. 'Shot List', 'Other').
+ */
+export async function ensureSongCategoryFolder(
+  account: OAuthAccount,
+  category: string,
+  songDriveFolderId: string
+): Promise<string> {
+  const folderName = categoryToDriveFolderName(category);
+  if (!folderName) return songDriveFolderId;
+  const subFolderId = await findOrCreateDriveFolder(account, folderName, songDriveFolderId);
+  return subFolderId ?? songDriveFolderId;
+}
+
 export async function createDriveFolder(account: OAuthAccount, folderName: string, parentFolderId?: string | null) {
   const oauthClient = getAuthorizedClient(account);
 

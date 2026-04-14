@@ -1,5 +1,5 @@
 import type { CreateSongRequest, ProjectDetails, SongWorkspace } from '@studioflow/shared';
-import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPencil, faCheck, faXmark, faTrash } from '@fortawesome/free-solid-svg-icons';
@@ -26,6 +26,8 @@ type ProjectAsset = {
   name: string;
   type: string;
   category: ProjectAssetCategory;
+  versionGroup: string;
+  versionNumber: number;
   fileSizeBytes: number | null;
   isLink: boolean;
   downloadUrl: string;
@@ -82,6 +84,7 @@ export function ProjectPage() {
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   const [renamingFolderValue, setRenamingFolderValue] = useState('');
   const [previewingAssetId, setPreviewingAssetId] = useState<string | null>(null);
+  const [selectedVersionByGroup, setSelectedVersionByGroup] = useState<Record<string, string>>({});
   const miscFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const toggleFolder = (folder: string) => {
@@ -113,9 +116,16 @@ export function ProjectPage() {
     }
   };
 
-  const downloadFolder = (folderAssets: ProjectAsset[]) => {
-    const downloadable = folderAssets.filter(a => !a.isLink);
-    downloadable.forEach((asset, i) => {
+  const downloadFolder = (groups: { groupKey: string; versions: ProjectAsset[] }[]) => {
+    // Download the currently-selected version of each group (skip links)
+    const toDownload = groups
+      .map(g => {
+        const key = g.groupKey;
+        const selectedId = selectedVersionByGroup[key];
+        return selectedId ? g.versions.find(v => v.id === selectedId) ?? g.versions[0] : g.versions[0];
+      })
+      .filter((a): a is ProjectAsset => !!a && !a.isLink);
+    toDownload.forEach((asset, i) => {
       setTimeout(() => {
         const a = document.createElement('a');
         a.href = resolveApiUrl(asset.downloadUrl);
@@ -310,11 +320,11 @@ export function ProjectPage() {
     if (miscSelectedFiles.length === 0) return;
     try {
       setMiscUploading(true);
+      setMiscUploadProgress(0);
       setError(null);
       const added: ProjectAsset[] = [];
       for (let i = 0; i < miscSelectedFiles.length; i++) {
         const file = miscSelectedFiles[i];
-        setMiscUploadProgress(0);
         const fd = new FormData();
         fd.append('file', file);
         fd.append('category', miscAssetCategory);
@@ -404,6 +414,30 @@ export function ProjectPage() {
       setCreating(false);
     }
   };
+
+  type AssetGroup = { groupKey: string; versions: ProjectAsset[] };
+  type FolderGroup = { folder: string; groups: AssetGroup[] };
+
+  // Group assets by category (folder), then within each folder by versionGroup.
+  // Within a group, versions are sorted newest-first (highest versionNumber first).
+  const groupedFolders = useMemo<FolderGroup[]>(() => {
+    const folderMap = new Map<string, Map<string, ProjectAsset[]>>();
+    for (const asset of miscAssets) {
+      if (!folderMap.has(asset.category)) folderMap.set(asset.category, new Map());
+      const groupMap = folderMap.get(asset.category)!;
+      if (!groupMap.has(asset.versionGroup)) groupMap.set(asset.versionGroup, []);
+      groupMap.get(asset.versionGroup)!.push(asset);
+    }
+    return Array.from(folderMap.entries()).map(([folder, groupMap]) => ({
+      folder,
+      groups: Array.from(groupMap.entries())
+        .map(([groupKey, versions]) => ({
+          groupKey,
+          versions: versions.slice().sort((a, b) => b.versionNumber - a.versionNumber)
+        }))
+        .sort((a, b) => new Date(b.versions[0].createdAt).getTime() - new Date(a.versions[0].createdAt).getTime())
+    }));
+  }, [miscAssets]);
 
   if (loading) {
     return (
@@ -700,11 +734,7 @@ export function ProjectPage() {
         <datalist id="misc-edit-category-list">
           {PROJECT_ASSET_CATEGORY_SUGGESTIONS.map(s => <option key={s} value={s} />)}
         </datalist>
-        {Object.entries(
-          miscAssets.reduce<Record<string, ProjectAsset[]>>((acc, a) => {
-            (acc[a.category] ??= []).push(a); return acc;
-          }, {})
-        ).map(([folder, folderAssets]) => (
+        {groupedFolders.map(({ folder, groups }) => (
           <div key={folder} className={`misc-folder${collapsedFolders.has(folder) ? ' misc-folder--collapsed' : ''}`}>
             {renamingFolder === folder ? (
               <div className="misc-folder__rename-row">
@@ -740,14 +770,14 @@ export function ProjectPage() {
                     <path d="M1 3.5A1.5 1.5 0 012.5 2h2.25l1.5 1.5H11.5A1.5 1.5 0 0113 5v5.5A1.5 1.5 0 0111.5 12h-9A1.5 1.5 0 011 10.5v-7z" stroke="currentColor" strokeWidth="1.2" fill="none"/>
                   </svg>
                   <span className="misc-folder__name">{folder}</span>
-                  <span className="misc-folder__count">{folderAssets.length}</span>
+                  <span className="misc-folder__count">{groups.length}</span>
                 </button>
                 <div className="misc-folder__header-actions">
-                  {folderAssets.some(a => !a.isLink) && (
+                  {groups.some(g => g.versions.some(a => !a.isLink)) && (
                     <button
                       className="btn btn-ghost btn-icon"
                       type="button"
-                      onClick={() => downloadFolder(folderAssets)}
+                      onClick={() => downloadFolder(groups)}
                       title="Download all"
                     >
                       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -768,13 +798,15 @@ export function ProjectPage() {
             )}
             {!collapsedFolders.has(folder) && (
               <ul className="misc-asset-list">
-                {folderAssets.map(asset => {
+                {groups.map(({ groupKey, versions }) => {
+                  const selectedId = selectedVersionByGroup[groupKey] ?? versions[0].id;
+                  const asset = versions.find(v => v.id === selectedId) ?? versions[0];
                   const mediaKind = asset.isLink ? 'other' : getMediaKind(asset.type);
                   const previewable = mediaKind === 'audio' || mediaKind === 'video' || mediaKind === 'image';
                   const isPreviewing = previewingAssetId === asset.id;
                   const assetSrc = resolveApiUrl(asset.downloadUrl);
                   return (
-                  <li key={asset.id} className={`misc-asset-row${isPreviewing ? ' misc-asset-row--previewing' : ''}`}>
+                  <li key={groupKey} className={`misc-asset-row${isPreviewing ? ' misc-asset-row--previewing' : ''}`}>
                     <div className="misc-asset-row__main">
                       {asset.isLink && (
                         <svg className="misc-asset-row__link-icon" width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
@@ -792,6 +824,10 @@ export function ProjectPage() {
                             <span className="misc-asset-row__size">{fmtFileBytes(asset.fileSizeBytes)}</span>
                           )}
                           {asset.isLink && <span className="misc-asset-row__type">Link</span>}
+                          <span className="misc-asset-row__type">v{asset.versionNumber}</span>
+                          {versions.length > 1 && (
+                            <span className="misc-asset-row__type">{versions.length} versions</span>
+                          )}
                         </div>
                       </div>
                       <div className="misc-asset-row__actions">
@@ -851,6 +887,25 @@ export function ProjectPage() {
                         </button>
                       </div>
                     </div>
+                    {versions.length > 1 && (
+                      <div className="misc-asset-version-row">
+                        <span className="misc-asset-version-label">Version</span>
+                        <select
+                          className="misc-asset-version-select"
+                          value={selectedId}
+                          onChange={e => {
+                            setSelectedVersionByGroup(cur => ({ ...cur, [groupKey]: e.target.value }));
+                            setPreviewingAssetId(null);
+                          }}
+                        >
+                          {versions.map(v => (
+                            <option key={v.id} value={v.id}>
+                              v{v.versionNumber} — {new Date(v.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     {isPreviewing && (
                       <div className="misc-asset-preview">
                         {mediaKind === 'audio' && (

@@ -76,7 +76,7 @@ export function mapProjectAssetCategory(category: string): ProjectAssetCategory 
 }
 
 export function mapProjectAsset(
-  asset: { id: string; projectId: string; name: string; type: string; category: string; fileSizeBytes: number | null; storageKey: string | null; createdAt: Date }
+  asset: { id: string; projectId: string; name: string; type: string; category: string; versionGroup: string; versionNumber: number; fileSizeBytes: number | null; storageKey: string | null; createdAt: Date }
 ): ProjectAsset {
   const isLink = Boolean(asset.storageKey?.startsWith('link:'));
   const downloadUrl = isLink
@@ -87,6 +87,8 @@ export function mapProjectAsset(
     name: asset.name,
     type: asset.type,
     category: mapProjectAssetCategory(asset.category),
+    versionGroup: asset.versionGroup,
+    versionNumber: asset.versionNumber,
     fileSizeBytes: asset.fileSizeBytes,
     isLink,
     downloadUrl,

@@ -11,9 +11,10 @@ type ProjectSummaryWithAssetCount = ProjectSummary & { projectAssetCount: number
 interface ProjectCardProps {
   project: ProjectSummaryWithAssetCount;
   onCoverUpload?: (file: File) => void;
+  uploadingCover?: boolean;
 }
 
-function ProjectCard({ project, onCoverUpload }: ProjectCardProps) {
+function ProjectCard({ project, onCoverUpload, uploadingCover }: ProjectCardProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -25,7 +26,12 @@ function ProjectCard({ project, onCoverUpload }: ProjectCardProps) {
             alt={`${project.title} cover`}
             className="project-card__cover-img"
           />
-          {onCoverUpload && (
+          {uploadingCover && (
+            <div className="project-card__cover-loading">
+              <div className="project-card__cover-spinner" />
+            </div>
+          )}
+          {onCoverUpload && !uploadingCover && (
             <button
               className="project-card__cover-edit"
               onClick={() => fileInputRef.current?.click()}
@@ -101,6 +107,7 @@ export function DashboardPage() {
   const [description, setDescription] = useState('');
   const [genre, setGenre] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [uploadingCoverId, setUploadingCoverId] = useState<string | null>(null);
 
   useEffect(() => {
     apiRequest<ProjectSummaryWithAssetCount[]>('/projects')
@@ -139,6 +146,7 @@ export function DashboardPage() {
   const uploadCover = async (projectId: string, file: File) => {
     const fd = new FormData();
     fd.append('image', file);
+    setUploadingCoverId(projectId);
     try {
       const updated = await apiUploadWithProgress<ProjectDetails>(
         `/projects/${projectId}/cover`,
@@ -151,6 +159,8 @@ export function DashboardPage() {
       ));
     } catch {
       // non-blocking — user can retry
+    } finally {
+      setUploadingCoverId(null);
     }
   };
 
@@ -214,6 +224,7 @@ export function DashboardPage() {
               key={project.id}
               project={project}
               onCoverUpload={(file) => uploadCover(project.id, file)}
+              uploadingCover={uploadingCoverId === project.id}
             />
           ))}
         </div>

@@ -13,6 +13,8 @@ export interface ProjectAsset {
   name: string;
   type: string;
   category: ProjectAssetCategory;
+  versionGroup: string;
+  versionNumber: number;
   fileSizeBytes: number | null;
   isLink: boolean;
   downloadUrl: string;

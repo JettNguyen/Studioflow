@@ -62,18 +62,21 @@ model Project {
 }
 
 model ProjectAsset {
-  id            String               @id @default(cuid())
+  id            String   @id @default(cuid())
   projectId     String
   name          String
-  type          String               @default("")
-  category      String               @default("Other")
+  type          String   @default("")
+  category      String   @default("Other")
+  versionGroup  String   @default("legacy")
+  versionNumber Int      @default(1)
   fileSizeBytes Int?
   storageKey    String?
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  project       Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
+  @@index([projectId, versionGroup, versionNumber])
 }
 
 model ProjectMembership {

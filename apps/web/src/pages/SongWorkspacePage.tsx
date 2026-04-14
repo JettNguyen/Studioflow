@@ -234,10 +234,10 @@ export function SongWorkspacePage() {
     const isSingle = selectedFiles.length === 1;
     try {
       setUploading(true);
+      setUploadProgress(0);
       setError(null);
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
-        setUploadProgress(0);
         const fd = new FormData();
         fd.append('file', file);
         fd.append('category', assetCategory);

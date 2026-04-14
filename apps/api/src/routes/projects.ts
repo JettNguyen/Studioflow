@@ -26,11 +26,24 @@ type RawProjectAsset = {
   name: string;
   type: string;
   category: string;
+  versionGroup: string;
+  versionNumber: number;
   fileSizeBytes: number | null;
   storageKey: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
+
+function slugifyVersionGroup(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 120) || 'file';
+}
 
 export const projectRouter = Router();
 const paramToString = (v: string | string[] | undefined) => Array.isArray(v) ? v[0] : (v ?? '');
@@ -490,7 +503,7 @@ projectRouter.get('/:projectId/assets', async (req, res) => {
   if (!membership) return res.status(404).json({ message: 'Project not found' });
 
   const assets = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE "projectId" = ${paramToString(req.params.projectId)}
     ORDER BY "createdAt" DESC
@@ -521,18 +534,28 @@ projectRouter.post('/:projectId/assets/link', async (req, res) => {
     ? req.body.name.trim()
     : 'Shot List';
 
+  const versionGroup = slugifyVersionGroup(assetName);
+  const [prevVersion] = await prisma.$queryRaw<{ versionNumber: number }[]>`
+    SELECT "versionNumber" FROM "ProjectAsset"
+    WHERE "projectId" = ${projectId} AND "versionGroup" = ${versionGroup}
+    ORDER BY "versionNumber" DESC LIMIT 1
+  `;
+  const versionNumber = prevVersion ? prevVersion.versionNumber + 1 : 1;
+
   const storageKey = `link:${linkUrl}`;
   const id = crypto.randomUUID();
   const now = new Date();
 
   await prisma.$executeRaw`
-    INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt")
+    INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt")
     VALUES (
       ${id},
       ${projectId},
       ${assetName},
       ${'text/uri-list'},
       ${category},
+      ${versionGroup},
+      ${versionNumber},
       ${null},
       ${storageKey},
       ${now},
@@ -541,7 +564,7 @@ projectRouter.post('/:projectId/assets/link', async (req, res) => {
   `;
 
   const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset" WHERE id = ${id}
   `;
 
@@ -563,6 +586,14 @@ projectRouter.post('/:projectId/assets', upload.single('file'), async (req, res)
     ? req.body.name.trim()
     : req.file.originalname;
 
+  const versionGroup = slugifyVersionGroup(assetName);
+  const [prevVersion] = await prisma.$queryRaw<{ versionNumber: number }[]>`
+    SELECT "versionNumber" FROM "ProjectAsset"
+    WHERE "projectId" = ${projectId} AND "versionGroup" = ${versionGroup}
+    ORDER BY "versionNumber" DESC LIMIT 1
+  `;
+  const versionNumber = prevVersion ? prevVersion.versionNumber + 1 : 1;
+
   const localFilePath = resolveStoredFilePath(req.file.filename);
   let storageKey: string | null = req.file.filename;
   const fileSizeBytes = req.file.size ?? null;
@@ -582,13 +613,15 @@ projectRouter.post('/:projectId/assets', upload.single('file'), async (req, res)
   const now = new Date();
 
   await prisma.$executeRaw`
-    INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt")
+    INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt")
     VALUES (
       ${id},
       ${projectId},
       ${assetName},
       ${req.file.mimetype},
       ${category},
+      ${versionGroup},
+      ${versionNumber},
       ${fileSizeBytes},
       ${storageKey},
       ${now},
@@ -597,7 +630,7 @@ projectRouter.post('/:projectId/assets', upload.single('file'), async (req, res)
   `;
 
   const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset" WHERE id = ${id}
   `;
 
@@ -612,7 +645,7 @@ projectRouter.get('/:projectId/assets/:assetId/download', async (req, res) => {
   if (!membership) return res.status(404).json({ message: 'Project not found' });
 
   const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE id = ${paramToString(req.params.assetId)}
       AND "projectId" = ${paramToString(req.params.projectId)}
@@ -664,7 +697,7 @@ projectRouter.delete('/:projectId/assets/:assetId', async (req, res) => {
   if (!membership) return res.status(404).json({ message: 'Project not found' });
 
   const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE id = ${paramToString(req.params.assetId)}
       AND "projectId" = ${paramToString(req.params.projectId)}
@@ -702,7 +735,7 @@ projectRouter.patch('/:projectId/assets/:assetId', async (req, res) => {
   }
 
   const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE id = ${paramToString(req.params.assetId)}
       AND "projectId" = ${paramToString(req.params.projectId)}
@@ -746,7 +779,7 @@ projectRouter.patch('/:projectId/assets/:assetId', async (req, res) => {
   );
 
   const [updated] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE id = ${paramToString(req.params.assetId)}
       AND "projectId" = ${paramToString(req.params.projectId)}

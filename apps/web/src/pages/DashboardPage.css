@@ -73,6 +73,28 @@
   opacity: 1;
 }
 
+.project-card__cover-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.project-card__cover-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: cover-spin 0.7s linear infinite;
+}
+
+@keyframes cover-spin {
+  to { transform: rotate(360deg); }
+}
+
 .project-card {
   display: flex;
   flex-direction: column;

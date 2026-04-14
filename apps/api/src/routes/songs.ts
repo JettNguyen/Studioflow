@@ -13,7 +13,7 @@ import { env } from '../config.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { resolveStoredFilePath, upload } from '../storage/localStorage.js';
 import { buildS3ObjectKey, uploadFileToS3 } from '../storage/s3Storage.js';
-import { createDriveFolder, uploadDriveFile } from '../utils/drive.js';
+import { createDriveFolder, ensureSongCategoryFolder, uploadDriveFile } from '../utils/drive.js';
 import { mapSongWorkspace } from '../utils/mappers.js';
 
 export const songRouter = Router();
@@ -660,11 +660,16 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
   // Drive upload is secondary: attempt it but do not let failures block the request.
   if (song.driveFolderId && googleAccount) {
     try {
+      const categoryFolderId = await ensureSongCategoryFolder(
+        googleAccount,
+        parsedMetadata.data.category,
+        song.driveFolderId
+      );
       driveFileId = await uploadDriveFile(googleAccount, {
         localFilePath,
         name: `${inputAssetName} (v${nextVersionNumber})`,
         mimeType: req.file.mimetype,
-        parentFolderId: song.driveFolderId
+        parentFolderId: categoryFolderId
       });
     } catch (driveErr) {
       // Drive failures should not fail the API response — log and continue.
