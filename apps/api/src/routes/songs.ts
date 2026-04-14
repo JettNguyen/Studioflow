@@ -427,6 +427,40 @@ songRouter.post('/:songId/tasks', async (req, res) => {
   });
 });
 
+songRouter.delete('/:songId/notes/:noteId', async (req, res) => {
+  const note = await prisma.note.findFirst({
+    where: {
+      id: req.params.noteId,
+      songId: req.params.songId,
+      song: {
+        project: {
+          memberships: { some: { userId: req.user!.id } }
+        }
+      }
+    }
+  });
+  if (!note) return res.status(404).json({ message: 'Note not found' });
+  await prisma.note.delete({ where: { id: req.params.noteId } });
+  res.status(204).send();
+});
+
+songRouter.delete('/:songId/tasks/:taskId', async (req, res) => {
+  const task = await prisma.task.findFirst({
+    where: {
+      id: req.params.taskId,
+      songId: req.params.songId,
+      song: {
+        project: {
+          memberships: { some: { userId: req.user!.id } }
+        }
+      }
+    }
+  });
+  if (!task) return res.status(404).json({ message: 'Task not found' });
+  await prisma.task.delete({ where: { id: req.params.taskId } });
+  res.status(204).send();
+});
+
 songRouter.patch('/:songId/tasks/:taskId', async (req, res) => {
   const parsed = updateTaskStatusSchema.safeParse(req.body satisfies UpdateTaskStatusRequest);
 

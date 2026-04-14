@@ -91,7 +91,7 @@ export function SongWorkspacePage() {
   const [assetName, setAssetName] = useState('');
   const [assetCategory, setAssetCategory] = useState<AssetCategory>('Song Audio');
   const [assetVersionGroup, setAssetVersionGroup] = useState('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [detectedFeatures, setDetectedFeatures] = useState<AudioFeatures | null>(null);
@@ -180,18 +180,19 @@ export function SongWorkspacePage() {
   // ── Audio analysis ────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!selectedFile || assetCategory !== 'Song Audio') {
+    const singleFile = selectedFiles.length === 1 ? selectedFiles[0] : null;
+    if (!singleFile || assetCategory !== 'Song Audio') {
       setDetectedFeatures(null);
       return;
     }
     let cancelled = false;
     setAnalyzing(true);
     setDetectedFeatures(null);
-    analyzeAudioFile(selectedFile).then(features => {
+    analyzeAudioFile(singleFile).then(features => {
       if (!cancelled) { setDetectedFeatures(features); setAnalyzing(false); }
     });
     return () => { cancelled = true; setAnalyzing(false); };
-  }, [selectedFile, assetCategory]);
+  }, [selectedFiles, assetCategory]);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -220,24 +221,31 @@ export function SongWorkspacePage() {
 
   const uploadAsset = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!songId || !selectedFile) { setError('Please choose a file.'); return; }
+    if (!songId || selectedFiles.length === 0) { setError('Please choose a file.'); return; }
+    const isSingle = selectedFiles.length === 1;
     try {
       setUploading(true);
-      setUploadProgress(0);
       setError(null);
-      const fd = new FormData();
-      fd.append('file', selectedFile);
-      fd.append('category', assetCategory);
-      if (assetName.trim()) fd.append('name', assetName.trim());
-      if (assetVersionGroup.trim()) fd.append('versionGroup', assetVersionGroup.trim());
-      const dur = await readFileDuration(selectedFile);
-      if (dur) fd.append('duration', dur);
-      if (assetCategory === 'Song Audio' && detectedFeatures) {
-        if (detectedFeatures.key) fd.append('detectedKey', detectedFeatures.key);
-        if (detectedFeatures.bpm !== null) fd.append('detectedBpm', String(detectedFeatures.bpm));
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i];
+        setUploadProgress(0);
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('category', assetCategory);
+        if (isSingle && assetName.trim()) fd.append('name', assetName.trim());
+        if (assetVersionGroup.trim()) fd.append('versionGroup', assetVersionGroup.trim());
+        const dur = await readFileDuration(file);
+        if (dur) fd.append('duration', dur);
+        if (isSingle && assetCategory === 'Song Audio' && detectedFeatures) {
+          if (detectedFeatures.key) fd.append('detectedKey', detectedFeatures.key);
+          if (detectedFeatures.bpm !== null) fd.append('detectedBpm', String(detectedFeatures.bpm));
+        }
+        await apiUploadWithProgress<SongAsset>(
+          `/songs/${songId}/assets`, fd,
+          pct => setUploadProgress(Math.round(((i + pct / 100) / selectedFiles.length) * 100))
+        );
       }
-      await apiUploadWithProgress<SongAsset>(`/songs/${songId}/assets`, fd, setUploadProgress);
-      setAssetName(''); setAssetVersionGroup(''); setSelectedFile(null); setDetectedFeatures(null);
+      setAssetName(''); setAssetVersionGroup(''); setSelectedFiles([]); setDetectedFeatures(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       await refreshSong();
     } catch (err) {
@@ -327,6 +335,22 @@ export function SongWorkspacePage() {
       setSong({ ...song, tasks: [task, ...song.tasks] });
       setTaskTitle(''); setError(null);
     } catch (err) { setError(err instanceof Error ? err.message : 'Failed to add task'); }
+  };
+
+  const deleteNote = async (noteId: string) => {
+    if (!songId || !song) return;
+    try {
+      await apiRequest(`/songs/${songId}/notes/${noteId}`, { method: 'DELETE' });
+      setSong({ ...song, notes: song.notes.filter(n => n.id !== noteId) });
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to delete note'); }
+  };
+
+  const deleteTask = async (taskId: string) => {
+    if (!songId || !song) return;
+    try {
+      await apiRequest(`/songs/${songId}/tasks/${taskId}`, { method: 'DELETE' });
+      setSong({ ...song, tasks: song.tasks.filter(t => t.id !== taskId) });
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to delete task'); }
   };
 
   const updateTaskStatus = async (taskId: string, status: SongTaskStatus) => {
@@ -840,28 +864,37 @@ export function SongWorkspacePage() {
               {uploadMode === 'file' ? (
                 <form className="form-stack" onSubmit={uploadAsset}>
                   <div className="form-row">
-                    <input className="input" value={assetName} onChange={e => setAssetName(e.target.value)} placeholder="Asset name (optional)" />
+                    {selectedFiles.length <= 1 && (
+                      <input className="input" value={assetName} onChange={e => setAssetName(e.target.value)} placeholder="Asset name (optional)" />
+                    )}
                     <select className="select" value={assetCategory} onChange={e => setAssetCategory(e.target.value as AssetCategory)}>
                       {CATEGORY_ORDER.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                     </select>
                     <input className="input" value={assetVersionGroup} onChange={e => setAssetVersionGroup(e.target.value)} placeholder="Version group (optional)" />
                   </div>
                   <div className="file-picker-row">
-                    <label className="btn btn-ghost btn-sm file-picker-label" htmlFor="asset-file-input">Choose file</label>
-                    <span className="file-picker-name">{selectedFile?.name ?? 'No file selected'}</span>
+                    <label className="btn btn-ghost btn-sm file-picker-label" htmlFor="asset-file-input">Choose files</label>
+                    <span className="file-picker-name">
+                      {selectedFiles.length === 0
+                        ? 'No files selected'
+                        : selectedFiles.length === 1
+                          ? selectedFiles[0].name
+                          : `${selectedFiles.length} files selected`}
+                    </span>
                     <input
                       id="asset-file-input"
                       ref={fileInputRef}
                       className="file-picker-hidden"
                       type="file"
-                      onChange={e => setSelectedFile(e.target.files?.[0] ?? null)}
+                      multiple
+                      onChange={e => setSelectedFiles(Array.from(e.target.files ?? []))}
                       required
                     />
-                    <button className="btn btn-primary btn-sm" type="submit" disabled={uploading || !selectedFile} style={{ marginLeft: 'auto' }}>
+                    <button className="btn btn-primary btn-sm" type="submit" disabled={uploading || selectedFiles.length === 0} style={{ marginLeft: 'auto' }}>
                       {uploading ? 'Uploading…' : 'Upload'}
                     </button>
                   </div>
-                  {assetCategory === 'Song Audio' && selectedFile && (
+                  {assetCategory === 'Song Audio' && selectedFiles.length === 1 && (
                     <div className="analysis-status">
                       {analyzing ? (
                         <span className="analysis-status__scanning">Analyzing audio…</span>
@@ -1187,6 +1220,17 @@ export function SongWorkspacePage() {
                     <time className="note-item__time" dateTime={note.createdAt} title={fmtAbsolute(note.createdAt)}>
                       {timeAgo(note.createdAt)}
                     </time>
+                    <button
+                      className="btn btn-ghost btn-icon note-item__delete"
+                      type="button"
+                      onClick={() => deleteNote(note.id)}
+                      aria-label="Delete note"
+                      title="Delete note"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                        <path d="M2 3h8M5 3V2h2v1M3 3l.5 7h5L9 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </button>
                   </div>
                   <p className="note-item__body">{note.body}</p>
                 </li>
@@ -1218,6 +1262,17 @@ export function SongWorkspacePage() {
                       <option value="In Review">In Review</option>
                       <option value="Done">Done</option>
                     </select>
+                    <button
+                      className="btn btn-ghost btn-icon task-item__delete"
+                      type="button"
+                      onClick={() => deleteTask(task.id)}
+                      aria-label="Delete task"
+                      title="Delete task"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                        <path d="M2 3h8M5 3V2h2v1M3 3l.5 7h5L9 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </button>
                   </div>
                   {task.assignee && <span className="task-item__assignee">{task.assignee}</span>}
                 </li>

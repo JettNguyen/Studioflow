@@ -270,6 +270,126 @@
   padding: 4px 0;
 }
 
+/* ── Folder grouping ── */
+.misc-folder {
+  display: flex;
+  flex-direction: column;
+}
+
+.misc-folder__header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: var(--r-2);
+  padding: 7px 10px;
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color 0.15s, color 0.15s;
+  text-align: left;
+}
+
+.misc-folder__header:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.misc-folder__chevron {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+  opacity: 0.5;
+}
+
+.misc-folder__chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
+.misc-folder__name {
+  flex: 1;
+}
+
+.misc-folder__count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 7px;
+}
+
+/* Wrapper that holds the collapsible header + action buttons side-by-side */
+.misc-folder__header-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.misc-folder__header-wrap .misc-folder__header {
+  flex: 1;
+}
+
+.misc-folder__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+  padding-right: 4px;
+}
+
+.misc-folder:hover .misc-folder__header-actions {
+  opacity: 1;
+}
+
+/* Inline rename row */
+.misc-folder__rename-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+}
+
+.misc-folder__rename-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Compact input variant for inline rename */
+.input--sm {
+  height: 28px;
+  font-size: 13px;
+  padding: 0 8px;
+}
+
+/* Link-mode toggle in upload form */
+.misc-link-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.misc-link-toggle input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.misc-asset-list {
+  padding-left: 16px;
+}
+
 /* file-picker helpers (same as workspace) */
 .project-files .file-picker-row {
   display: flex;

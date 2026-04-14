@@ -583,6 +583,17 @@
   line-height: 1.55;
 }
 
+.note-item__delete {
+  opacity: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+
+.note-item:hover .note-item__delete {
+  opacity: 1;
+}
+
 /* ── Task list ── */
 .task-list {
   display: flex;
@@ -648,6 +659,16 @@
 .task-item__assignee {
   font-size: 11px;
   color: var(--text-3);
+}
+
+.task-item__delete {
+  opacity: 0;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+
+.task-item:hover .task-item__delete {
+  opacity: 1;
 }
 
 /* ── Sidebar ── */

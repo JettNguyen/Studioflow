@@ -471,20 +471,15 @@ projectRouter.delete('/:projectId/cover', async (req, res) => {
 
 // ── Project Assets (Misc / non-song files) ────────────────────────────────────
 
-const PROJECT_ASSET_CATEGORIES = ['Shot List', 'Filming Clip', 'Trailer Version', 'Trailer Audio', 'Other'] as const;
-
 const updateProjectAssetSchema = z.object({
   name: z.string().trim().min(1).max(255).optional(),
-  category: z.enum(PROJECT_ASSET_CATEGORIES).optional(),
+  category: z.string().trim().min(1).max(80).optional(),
   linkUrl: z.string().trim().url().optional()
 });
 
-function toPrismaProjectAssetCategory(category: string): string {
-  if (category === 'Shot List') return 'ShotList';
-  if (category === 'Filming Clip') return 'FilmingClip';
-  if (category === 'Trailer Version') return 'TrailerVersion';
-  if (category === 'Trailer Audio') return 'TrailerAudio';
-  return 'Misc';
+function sanitizeCategory(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw.trim()) return 'Other';
+  return raw.trim().slice(0, 80);
 }
 
 // List project misc assets
@@ -495,7 +490,7 @@ projectRouter.get('/:projectId/assets', async (req, res) => {
   if (!membership) return res.status(404).json({ message: 'Project not found' });
 
   const assets = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE "projectId" = ${paramToString(req.params.projectId)}
     ORDER BY "createdAt" DESC
@@ -512,11 +507,7 @@ projectRouter.post('/:projectId/assets/link', async (req, res) => {
   if (!membership) return res.status(404).json({ message: 'Project not found' });
 
   const projectId = paramToString(req.params.projectId);
-  const rawCategory = typeof req.body.category === 'string' ? req.body.category : 'Other';
-  const category = PROJECT_ASSET_CATEGORIES.includes(rawCategory as typeof PROJECT_ASSET_CATEGORIES[number])
-    ? rawCategory
-    : 'Other';
-  const prismaCategory = toPrismaProjectAssetCategory(category);
+  const category = sanitizeCategory(req.body.category);
 
   const linkUrl = typeof req.body.linkUrl === 'string' ? req.body.linkUrl.trim() : '';
   if (!linkUrl) return res.status(400).json({ message: 'linkUrl is required' });
@@ -541,7 +532,7 @@ projectRouter.post('/:projectId/assets/link', async (req, res) => {
       ${projectId},
       ${assetName},
       ${'text/uri-list'},
-      ${prismaCategory}::"ProjectAssetCategory",
+      ${category},
       ${null},
       ${storageKey},
       ${now},
@@ -550,7 +541,7 @@ projectRouter.post('/:projectId/assets/link', async (req, res) => {
   `;
 
   const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset" WHERE id = ${id}
   `;
 
@@ -566,11 +557,7 @@ projectRouter.post('/:projectId/assets', upload.single('file'), async (req, res)
   if (!req.file) return res.status(400).json({ message: 'No file provided' });
 
   const projectId = paramToString(req.params.projectId);
-  const rawCategory = typeof req.body.category === 'string' ? req.body.category : 'Other';
-  const category = PROJECT_ASSET_CATEGORIES.includes(rawCategory as typeof PROJECT_ASSET_CATEGORIES[number])
-    ? rawCategory
-    : 'Other';
-  const prismaCategory = toPrismaProjectAssetCategory(category);
+  const category = sanitizeCategory(req.body.category);
 
   const assetName = (typeof req.body.name === 'string' && req.body.name.trim())
     ? req.body.name.trim()
@@ -601,7 +588,7 @@ projectRouter.post('/:projectId/assets', upload.single('file'), async (req, res)
       ${projectId},
       ${assetName},
       ${req.file.mimetype},
-      ${prismaCategory}::"ProjectAssetCategory",
+      ${category},
       ${fileSizeBytes},
       ${storageKey},
       ${now},
@@ -610,7 +597,7 @@ projectRouter.post('/:projectId/assets', upload.single('file'), async (req, res)
   `;
 
   const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset" WHERE id = ${id}
   `;
 
@@ -625,7 +612,7 @@ projectRouter.get('/:projectId/assets/:assetId/download', async (req, res) => {
   if (!membership) return res.status(404).json({ message: 'Project not found' });
 
   const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE id = ${paramToString(req.params.assetId)}
       AND "projectId" = ${paramToString(req.params.projectId)}
@@ -677,7 +664,7 @@ projectRouter.delete('/:projectId/assets/:assetId', async (req, res) => {
   if (!membership) return res.status(404).json({ message: 'Project not found' });
 
   const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE id = ${paramToString(req.params.assetId)}
       AND "projectId" = ${paramToString(req.params.projectId)}
@@ -715,7 +702,7 @@ projectRouter.patch('/:projectId/assets/:assetId', async (req, res) => {
   }
 
   const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE id = ${paramToString(req.params.assetId)}
       AND "projectId" = ${paramToString(req.params.projectId)}
@@ -733,8 +720,8 @@ projectRouter.patch('/:projectId/assets/:assetId', async (req, res) => {
   }
 
   if (typeof parsed.data.category === 'string') {
-    updates.push(`category = $${idx++}::"ProjectAssetCategory"`);
-    values.push(toPrismaProjectAssetCategory(parsed.data.category));
+    updates.push(`category = $${idx++}`);
+    values.push(parsed.data.category.trim().slice(0, 80));
   }
 
   if (typeof parsed.data.linkUrl === 'string') {
@@ -759,7 +746,7 @@ projectRouter.patch('/:projectId/assets/:assetId', async (req, res) => {
   );
 
   const [updated] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category::text, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE id = ${paramToString(req.params.assetId)}
       AND "projectId" = ${paramToString(req.params.projectId)}

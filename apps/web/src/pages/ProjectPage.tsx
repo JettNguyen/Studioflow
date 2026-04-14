@@ -7,11 +7,11 @@ import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
 import { Breadcrumb } from '../components/Breadcrumb';
 import './ProjectPage.css';
 
-const PROJECT_ASSET_CATEGORIES: ProjectAssetCategory[] = [
+const PROJECT_ASSET_CATEGORY_SUGGESTIONS = [
   'Shot List', 'Filming Clip', 'Trailer Version', 'Trailer Audio', 'Other'
 ];
 
-type ProjectAssetCategory = 'Shot List' | 'Filming Clip' | 'Trailer Version' | 'Trailer Audio' | 'Other';
+type ProjectAssetCategory = string;
 
 type ProjectAsset = {
   id: string;
@@ -61,15 +61,62 @@ export function ProjectPage() {
   const [miscUploading, setMiscUploading] = useState(false);
   const [miscUploadProgress, setMiscUploadProgress] = useState<number | null>(null);
   const [miscAssetName, setMiscAssetName] = useState('');
-  const [miscAssetCategory, setMiscAssetCategory] = useState<ProjectAssetCategory>('Other');
-  const [miscSelectedFile, setMiscSelectedFile] = useState<File | null>(null);
+  const [miscAssetCategory, setMiscAssetCategory] = useState('Other');
+  const [miscUploadAsLink, setMiscUploadAsLink] = useState(false);
+  const [miscSelectedFiles, setMiscSelectedFiles] = useState<File[]>([]);
   const [miscLinkUrl, setMiscLinkUrl] = useState('');
   const [editingMiscAssetId, setEditingMiscAssetId] = useState<string | null>(null);
   const [editMiscAssetName, setEditMiscAssetName] = useState('');
-  const [editMiscAssetCategory, setEditMiscAssetCategory] = useState<ProjectAssetCategory>('Other');
+  const [editMiscAssetCategory, setEditMiscAssetCategory] = useState('Other');
   const [editMiscLinkUrl, setEditMiscLinkUrl] = useState('');
   const [savingMiscAssetEdit, setSavingMiscAssetEdit] = useState(false);
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
+  const [renamingFolderValue, setRenamingFolderValue] = useState('');
   const miscFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const toggleFolder = (folder: string) => {
+    setCollapsedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(folder)) next.delete(folder); else next.add(folder);
+      return next;
+    });
+  };
+
+  const startRenameFolder = (folder: string) => {
+    setRenamingFolder(folder);
+    setRenamingFolderValue(folder);
+  };
+
+  const renameFolder = async (oldName: string) => {
+    const newName = renamingFolderValue.trim();
+    if (!newName || newName === oldName || !projectId) { setRenamingFolder(null); return; }
+    const targets = miscAssets.filter(a => a.category === oldName);
+    try {
+      await Promise.all(targets.map(a =>
+        apiRequest(`/projects/${projectId}/assets/${a.id}`, { method: 'PATCH', body: { category: newName } })
+      ));
+      setMiscAssets(prev => prev.map(a => a.category === oldName ? { ...a, category: newName } : a));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rename folder');
+    } finally {
+      setRenamingFolder(null);
+    }
+  };
+
+  const downloadFolder = (folderAssets: ProjectAsset[]) => {
+    const downloadable = folderAssets.filter(a => !a.isLink);
+    downloadable.forEach((asset, i) => {
+      setTimeout(() => {
+        const a = document.createElement('a');
+        a.href = resolveApiUrl(asset.downloadUrl);
+        a.download = asset.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }, i * 300);
+    });
+  };
 
   useEffect(() => {
     if (!projectId) {
@@ -225,8 +272,8 @@ export function ProjectPage() {
     e.preventDefault();
     if (!projectId) return;
 
-    // Shot List category → save as a link, not a file upload
-    if (miscAssetCategory === 'Shot List') {
+    // Link mode → save as a URL reference, not a file upload
+    if (miscUploadAsLink) {
       if (!miscLinkUrl.trim()) return;
       try {
         setMiscUploading(true);
@@ -234,9 +281,9 @@ export function ProjectPage() {
         const newAsset = await apiRequest<ProjectAsset>(`/projects/${projectId}/assets/link`, {
           method: 'POST',
           body: {
-            category: 'Shot List',
+            category: miscAssetCategory.trim() || 'Other',
             linkUrl: miscLinkUrl.trim(),
-            name: miscAssetName.trim() || 'Shot List'
+            name: miscAssetName.trim() || miscAssetCategory.trim() || 'Link'
           }
         });
         setMiscAssets(prev => [newAsset, ...prev]);
@@ -251,21 +298,28 @@ export function ProjectPage() {
       return;
     }
 
-    if (!miscSelectedFile) return;
+    if (miscSelectedFiles.length === 0) return;
     try {
       setMiscUploading(true);
-      setMiscUploadProgress(0);
       setError(null);
-      const fd = new FormData();
-      fd.append('file', miscSelectedFile);
-      fd.append('category', miscAssetCategory);
-      if (miscAssetName.trim()) fd.append('name', miscAssetName.trim());
-      const newAsset = await apiUploadWithProgress<ProjectAsset>(
-        `/projects/${projectId}/assets`, fd, setMiscUploadProgress
-      );
-      setMiscAssets(prev => [newAsset, ...prev]);
+      const added: ProjectAsset[] = [];
+      for (let i = 0; i < miscSelectedFiles.length; i++) {
+        const file = miscSelectedFiles[i];
+        setMiscUploadProgress(0);
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('category', miscAssetCategory);
+        const name = miscSelectedFiles.length === 1 && miscAssetName.trim() ? miscAssetName.trim() : '';
+        if (name) fd.append('name', name);
+        const newAsset = await apiUploadWithProgress<ProjectAsset>(
+          `/projects/${projectId}/assets`, fd,
+          pct => setMiscUploadProgress(Math.round(((i + pct / 100) / miscSelectedFiles.length) * 100))
+        );
+        added.push(newAsset);
+      }
+      setMiscAssets(prev => [...added.reverse(), ...prev]);
       setMiscAssetName('');
-      setMiscSelectedFile(null);
+      setMiscSelectedFiles([]);
       setMiscAssetCategory('Other');
       if (miscFileInputRef.current) miscFileInputRef.current.value = '';
       setMiscUploadOpen(false);
@@ -538,39 +592,49 @@ export function ProjectPage() {
 
         {miscUploadOpen && (
           <div className="card misc-upload-card">
+            <datalist id="misc-category-list">
+              {PROJECT_ASSET_CATEGORY_SUGGESTIONS.map(s => <option key={s} value={s} />)}
+            </datalist>
             <form className="form-stack" onSubmit={uploadMiscAsset}>
               <div className="form-row">
+                {(miscUploadAsLink || miscSelectedFiles.length <= 1) && (
+                  <input
+                    className="input"
+                    value={miscAssetName}
+                    onChange={e => setMiscAssetName(e.target.value)}
+                    placeholder="Name (optional)"
+                  />
+                )}
                 <input
                   className="input"
-                  value={miscAssetName}
-                  onChange={e => setMiscAssetName(e.target.value)}
-                  placeholder={miscAssetCategory === 'Shot List' ? 'Label (optional)' : 'File name (optional)'}
-                />
-                <select
-                  className="select"
+                  list="misc-category-list"
                   value={miscAssetCategory}
-                  onChange={e => {
-                    setMiscAssetCategory(e.target.value as ProjectAssetCategory);
-                    setMiscSelectedFile(null);
-                    setMiscLinkUrl('');
-                    if (miscFileInputRef.current) miscFileInputRef.current.value = '';
-                  }}
-                >
-                  {PROJECT_ASSET_CATEGORIES.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
+                  onChange={e => setMiscAssetCategory(e.target.value)}
+                  placeholder="Folder"
+                />
+                <label className="misc-link-toggle" title="Upload as link instead of file">
+                  <input
+                    type="checkbox"
+                    checked={miscUploadAsLink}
+                    onChange={e => {
+                      setMiscUploadAsLink(e.target.checked);
+                      setMiscSelectedFiles([]);
+                      setMiscLinkUrl('');
+                      if (miscFileInputRef.current) miscFileInputRef.current.value = '';
+                    }}
+                  />
+                  Link
+                </label>
               </div>
 
-              {miscAssetCategory === 'Shot List' ? (
-                /* Link input for Shot List */
+              {miscUploadAsLink ? (
                 <div className="form-row">
                   <input
                     className="input"
                     type="url"
                     value={miscLinkUrl}
                     onChange={e => setMiscLinkUrl(e.target.value)}
-                    placeholder="https://docs.google.com/document/d/…"
+                    placeholder="https://docs.google.com/…"
                     required
                   />
                   <button
@@ -583,24 +647,30 @@ export function ProjectPage() {
                   </button>
                 </div>
               ) : (
-                /* File picker for all other categories */
                 <div className="file-picker-row">
                   <label className="btn btn-ghost btn-sm file-picker-label" htmlFor="misc-file-input">
-                    Choose file
+                    Choose files
                   </label>
-                  <span className="file-picker-name">{miscSelectedFile?.name ?? 'No file selected'}</span>
+                  <span className="file-picker-name">
+                    {miscSelectedFiles.length === 0
+                      ? 'No files selected'
+                      : miscSelectedFiles.length === 1
+                        ? miscSelectedFiles[0].name
+                        : `${miscSelectedFiles.length} files selected`}
+                  </span>
                   <input
                     id="misc-file-input"
                     ref={miscFileInputRef}
                     className="file-picker-hidden"
                     type="file"
-                    onChange={e => setMiscSelectedFile(e.target.files?.[0] ?? null)}
+                    multiple
+                    onChange={e => setMiscSelectedFiles(Array.from(e.target.files ?? []))}
                     required
                   />
                   <button
                     className="btn btn-primary btn-sm"
                     type="submit"
-                    disabled={miscUploading || !miscSelectedFile}
+                    disabled={miscUploading || miscSelectedFiles.length === 0}
                     style={{ marginLeft: 'auto' }}
                   >
                     {miscUploading ? 'Uploading…' : 'Upload'}
@@ -618,120 +688,186 @@ export function ProjectPage() {
           </div>
         )}
 
-        {miscAssets.length > 0 && (
-          <ul className="misc-asset-list">
-            {miscAssets.map(asset => (
-              <li key={asset.id} className="misc-asset-row">
-                {asset.isLink && (
-                  <svg className="misc-asset-row__link-icon" width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
-                    <rect width="20" height="20" rx="3" fill="#4285F4" opacity="0.15"/>
-                    <path d="M5 5h6l4 4v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" stroke="#4285F4" strokeWidth="1.2" fill="none"/>
-                    <path d="M11 5v4h4" stroke="#4285F4" strokeWidth="1.2" strokeLinejoin="round" fill="none"/>
-                    <path d="M7 10h6M7 12h6M7 14h4" stroke="#4285F4" strokeWidth="1" strokeLinecap="round"/>
+        <datalist id="misc-edit-category-list">
+          {PROJECT_ASSET_CATEGORY_SUGGESTIONS.map(s => <option key={s} value={s} />)}
+        </datalist>
+        {Object.entries(
+          miscAssets.reduce<Record<string, ProjectAsset[]>>((acc, a) => {
+            (acc[a.category] ??= []).push(a); return acc;
+          }, {})
+        ).map(([folder, folderAssets]) => (
+          <div key={folder} className="misc-folder">
+            {renamingFolder === folder ? (
+              <div className="misc-folder__rename-row">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ flexShrink: 0, opacity: 0.5 }}>
+                  <path d="M1 3.5A1.5 1.5 0 012.5 2h2.25l1.5 1.5H11.5A1.5 1.5 0 0113 5v5.5A1.5 1.5 0 0111.5 12h-9A1.5 1.5 0 011 10.5v-7z" stroke="currentColor" strokeWidth="1.2" fill="none"/>
+                </svg>
+                <input
+                  className="input input--sm misc-folder__rename-input"
+                  value={renamingFolderValue}
+                  onChange={e => setRenamingFolderValue(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); renameFolder(folder); } if (e.key === 'Escape') setRenamingFolder(null); }}
+                  autoFocus
+                />
+                <button className="btn btn-primary btn-icon" type="button" onClick={() => renameFolder(folder)} title="Save">
+                  <FontAwesomeIcon icon={faCheck} />
+                </button>
+                <button className="btn btn-ghost btn-icon" type="button" onClick={() => setRenamingFolder(null)} title="Cancel">
+                  <FontAwesomeIcon icon={faXmark} />
+                </button>
+              </div>
+            ) : (
+              <div className="misc-folder__header-wrap">
+                <button
+                  className="misc-folder__header"
+                  type="button"
+                  onClick={() => toggleFolder(folder)}
+                  aria-expanded={!collapsedFolders.has(folder)}
+                >
+                  <svg className={`misc-folder__chevron${collapsedFolders.has(folder) ? ' misc-folder__chevron--collapsed' : ''}`} width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+                    <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
-                )}
-                <div className="misc-asset-row__info">
-                  <span className="misc-asset-row__name">{asset.name}</span>
-                  <div className="misc-asset-row__meta">
-                    <span className="badge badge-default">{asset.category}</span>
-                    {!asset.isLink && asset.type && <span className="misc-asset-row__type">{fmtFileType(asset.type)}</span>}
-                    {!asset.isLink && asset.fileSizeBytes && (
-                      <span className="misc-asset-row__size">{fmtFileBytes(asset.fileSizeBytes)}</span>
-                    )}
-                    {asset.isLink && <span className="misc-asset-row__type">Google Doc</span>}
-                  </div>
-                </div>
-
-                <div className="misc-asset-row__actions">
-                  <a
-                    className="btn btn-ghost btn-icon"
-                    href={asset.isLink ? asset.downloadUrl : resolveApiUrl(asset.downloadUrl)}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label={asset.isLink ? 'Open link' : 'Download file'}
-                    title={asset.isLink ? 'Open link' : 'Download file'}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                      {asset.isLink ? (
-                        <path d="M4 2.5h5.5V8M9.5 2.5 2.5 9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                      ) : (
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <path d="M1 3.5A1.5 1.5 0 012.5 2h2.25l1.5 1.5H11.5A1.5 1.5 0 0113 5v5.5A1.5 1.5 0 0111.5 12h-9A1.5 1.5 0 011 10.5v-7z" stroke="currentColor" strokeWidth="1.2" fill="none"/>
+                  </svg>
+                  <span className="misc-folder__name">{folder}</span>
+                  <span className="misc-folder__count">{folderAssets.length}</span>
+                </button>
+                <div className="misc-folder__header-actions">
+                  {folderAssets.some(a => !a.isLink) && (
+                    <button
+                      className="btn btn-ghost btn-icon"
+                      type="button"
+                      onClick={() => downloadFolder(folderAssets)}
+                      title="Download all files in folder"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                         <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                      )}
-                    </svg>
-                  </a>
+                      </svg>
+                    </button>
+                  )}
                   <button
                     className="btn btn-ghost btn-icon"
                     type="button"
-                    onClick={() => startEditMiscAsset(asset)}
-                    aria-label="Edit project file"
-                    title="Edit"
+                    onClick={() => startRenameFolder(folder)}
+                    title="Rename folder"
                   >
                     <FontAwesomeIcon icon={faPencil} />
                   </button>
-                  <button
-                    className="btn btn-danger btn-icon"
-                    type="button"
-                    onClick={() => deleteMiscAsset(asset.id, asset.name)}
-                    aria-label="Remove project file"
-                    title="Remove"
-                  >
-                    <FontAwesomeIcon icon={faTrash} />
-                  </button>
                 </div>
-
-                {editingMiscAssetId === asset.id && (
-                  <div className="misc-asset-edit-form">
-                    <div className="form-row">
-                      <input
-                        className="input"
-                        value={editMiscAssetName}
-                        onChange={e => setEditMiscAssetName(e.target.value)}
-                        placeholder="Asset name"
-                      />
-                      <select
-                        className="select"
-                        value={editMiscAssetCategory}
-                        onChange={e => setEditMiscAssetCategory(e.target.value as ProjectAssetCategory)}
+              </div>
+            )}
+            {!collapsedFolders.has(folder) && (
+              <ul className="misc-asset-list">
+                {folderAssets.map(asset => (
+                  <li key={asset.id} className="misc-asset-row">
+                    {asset.isLink && (
+                      <svg className="misc-asset-row__link-icon" width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+                        <rect width="20" height="20" rx="3" fill="#4285F4" opacity="0.15"/>
+                        <path d="M5 5h6l4 4v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" stroke="#4285F4" strokeWidth="1.2" fill="none"/>
+                        <path d="M11 5v4h4" stroke="#4285F4" strokeWidth="1.2" strokeLinejoin="round" fill="none"/>
+                        <path d="M7 10h6M7 12h6M7 14h4" stroke="#4285F4" strokeWidth="1" strokeLinecap="round"/>
+                      </svg>
+                    )}
+                    <div className="misc-asset-row__info">
+                      <span className="misc-asset-row__name">{asset.name}</span>
+                      <div className="misc-asset-row__meta">
+                        {!asset.isLink && asset.type && <span className="misc-asset-row__type">{fmtFileType(asset.type)}</span>}
+                        {!asset.isLink && asset.fileSizeBytes && (
+                          <span className="misc-asset-row__size">{fmtFileBytes(asset.fileSizeBytes)}</span>
+                        )}
+                        {asset.isLink && <span className="misc-asset-row__type">Google Doc</span>}
+                      </div>
+                    </div>
+                    <div className="misc-asset-row__actions">
+                      <a
+                        className="btn btn-ghost btn-icon"
+                        href={asset.isLink ? asset.downloadUrl : resolveApiUrl(asset.downloadUrl)}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={asset.isLink ? 'Open link' : 'Download file'}
+                        title={asset.isLink ? 'Open link' : 'Download file'}
                       >
-                        {PROJECT_ASSET_CATEGORIES.map(cat => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
-                      </select>
-                      {asset.isLink && (
-                        <input
-                          className="input"
-                          type="url"
-                          value={editMiscLinkUrl}
-                          onChange={e => setEditMiscLinkUrl(e.target.value)}
-                          placeholder="https://docs.google.com/document/d/..."
-                        />
-                      )}
-                      <button
-                        className="btn btn-primary btn-icon"
-                        type="button"
-                        onClick={() => saveMiscAsset(asset)}
-                        disabled={savingMiscAssetEdit || !editMiscAssetName.trim() || (asset.isLink && !editMiscLinkUrl.trim())}
-                        aria-label="Save"
-                        title="Save"
-                      >
-                        <FontAwesomeIcon icon={faCheck} />
-                      </button>
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                          {asset.isLink ? (
+                            <path d="M4 2.5h5.5V8M9.5 2.5 2.5 9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                          ) : (
+                            <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                          )}
+                        </svg>
+                      </a>
                       <button
                         className="btn btn-ghost btn-icon"
                         type="button"
-                        onClick={() => setEditingMiscAssetId(null)}
-                        aria-label="Cancel"
-                        title="Cancel"
+                        onClick={() => startEditMiscAsset(asset)}
+                        aria-label="Edit project file"
+                        title="Edit"
                       >
-                        <FontAwesomeIcon icon={faXmark} />
+                        <FontAwesomeIcon icon={faPencil} />
+                      </button>
+                      <button
+                        className="btn btn-danger btn-icon"
+                        type="button"
+                        onClick={() => deleteMiscAsset(asset.id, asset.name)}
+                        aria-label="Remove project file"
+                        title="Remove"
+                      >
+                        <FontAwesomeIcon icon={faTrash} />
                       </button>
                     </div>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+                    {editingMiscAssetId === asset.id && (
+                      <div className="misc-asset-edit-form">
+                        <div className="form-row">
+                          <input
+                            className="input"
+                            value={editMiscAssetName}
+                            onChange={e => setEditMiscAssetName(e.target.value)}
+                            placeholder="Asset name"
+                          />
+                          <input
+                            className="input"
+                            list="misc-edit-category-list"
+                            value={editMiscAssetCategory}
+                            onChange={e => setEditMiscAssetCategory(e.target.value)}
+                            placeholder="Folder"
+                          />
+                          {asset.isLink && (
+                            <input
+                              className="input"
+                              type="url"
+                              value={editMiscLinkUrl}
+                              onChange={e => setEditMiscLinkUrl(e.target.value)}
+                              placeholder="https://docs.google.com/document/d/..."
+                            />
+                          )}
+                          <button
+                            className="btn btn-primary btn-icon"
+                            type="button"
+                            onClick={() => saveMiscAsset(asset)}
+                            disabled={savingMiscAssetEdit || !editMiscAssetName.trim() || (asset.isLink && !editMiscLinkUrl.trim())}
+                            aria-label="Save"
+                            title="Save"
+                          >
+                            <FontAwesomeIcon icon={faCheck} />
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-icon"
+                            type="button"
+                            onClick={() => setEditingMiscAssetId(null)}
+                            aria-label="Cancel"
+                            title="Cancel"
+                          >
+                            <FontAwesomeIcon icon={faXmark} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
 
         {miscAssets.length === 0 && !miscUploadOpen && (
           <p className="misc-empty">No project files yet. Upload trailer clips, shot lists, and other assets here.</p>

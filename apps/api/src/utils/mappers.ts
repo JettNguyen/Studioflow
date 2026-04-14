@@ -71,11 +71,8 @@ function mapAssetCategory(category: string): AssetCategory {
 }
 
 export function mapProjectAssetCategory(category: string): ProjectAssetCategory {
-  if (category === 'ShotList') return 'Shot List';
-  if (category === 'FilmingClip') return 'Filming Clip';
-  if (category === 'TrailerVersion') return 'Trailer Version';
-  if (category === 'TrailerAudio') return 'Trailer Audio';
-  return 'Other';
+  // Category is now stored as a plain string (display name) — return as-is.
+  return (category || 'Other') as ProjectAssetCategory;
 }
 
 export function mapProjectAsset(
