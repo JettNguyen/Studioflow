@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPencil, faCheck, faXmark, faTrash } from '@fortawesome/free-solid-svg-icons';
 import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
+import { useDropZone } from '../context/DropZoneContext';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { WaveformPlayer } from '../components/WaveformPlayer';
 import './ProjectPage.css';
@@ -156,6 +157,16 @@ export function ProjectPage() {
       .then(setMiscAssets)
       .catch(() => { /* non-fatal */ });
   }, [projectId]);
+
+  // ── Global drag-and-drop (desktop only) ──────────────────────────────────
+  const { registerHandler } = useDropZone();
+  useEffect(() => {
+    return registerHandler(files => {
+      setMiscSelectedFiles(files);
+      setMiscUploadOpen(true);
+      setMiscUploadAsLink(false);
+    });
+  }, [registerHandler]);
 
   useEffect(() => {
     if (!project) return;
@@ -909,7 +920,12 @@ export function ProjectPage() {
                     {isPreviewing && (
                       <div className="misc-asset-preview">
                         {mediaKind === 'audio' && (
-                          <WaveformPlayer src={assetSrc} />
+                          <WaveformPlayer
+                            src={assetSrc}
+                            trackTitle={asset.name}
+                            trackSubtitle={project?.title}
+                            pageUrl={`/projects/${projectId}`}
+                          />
                         )}
                         {mediaKind === 'video' && (
                           <video

@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
 import { analyzeAudioFile, type AudioFeatures } from '../lib/audioAnalysis';
+import { useDropZone } from '../context/DropZoneContext';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { WaveformPlayer } from '../components/WaveformPlayer';
 import { VideoThumbnail } from '../components/VideoThumbnail';
@@ -139,6 +140,16 @@ export function SongWorkspacePage() {
     () => activeVideoAsset?.streamUrl ? resolveApiUrl(activeVideoAsset.streamUrl) : null,
     [activeVideoAsset]
   );
+
+  // ── Global drag-and-drop (desktop only) ──────────────────────────────────
+  const { registerHandler } = useDropZone();
+  useEffect(() => {
+    return registerHandler(files => {
+      setSelectedFiles(files);
+      setUploadOpen(true);
+      setUploadMode('file');
+    });
+  }, [registerHandler]);
 
   // ── Data ──────────────────────────────────────────────────────────────────
 
@@ -525,7 +536,12 @@ export function SongWorkspacePage() {
 
         {/* Waveform player for audio */}
         {asset.mediaKind === 'audio' && asset.streamUrl && (
-          <WaveformPlayer src={resolveApiUrl(asset.streamUrl)} />
+          <WaveformPlayer
+            src={resolveApiUrl(asset.streamUrl)}
+            trackTitle={asset.name}
+            trackSubtitle={song?.title}
+            pageUrl={`/projects/${projectId}/songs/${songId}`}
+          />
         )}
 
         {/* Meta tags */}

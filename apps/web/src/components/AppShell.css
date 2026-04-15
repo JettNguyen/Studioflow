@@ -155,6 +155,11 @@
   padding-right: calc(30px + env(safe-area-inset-right));
 }
 
+/* When the persistent player is visible, add extra bottom clearance */
+[data-player='visible'] .page-content {
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
 /* ─────────────────────────────────────────────────────────────
    RESPONSIVE
 ───────────────────────────────────────────────────────────────*/
@@ -205,5 +210,9 @@
     padding-bottom: calc(80px + env(safe-area-inset-bottom));
     padding-left: calc(15px + env(safe-area-inset-left));
     padding-right: calc(15px + env(safe-area-inset-right));
+  }
+
+  [data-player='visible'] .page-content {
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
   }
 }

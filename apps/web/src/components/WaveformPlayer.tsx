@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAudioPlayer } from '../context/AudioPlayerContext';
 import './WaveformPlayer.css';
 
 interface WaveformPlayerProps {
   src: string;
+  /** Displayed in the persistent bottom bar */
+  trackTitle?: string;
+  /** Secondary line in the persistent bottom bar (e.g. song name) */
+  trackSubtitle?: string;
+  /** Route to navigate to when the bottom bar is clicked */
+  pageUrl?: string;
 }
 
 function fmt(s: number): string {
@@ -10,24 +17,25 @@ function fmt(s: number): string {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 }
 
-export function WaveformPlayer({ src }: WaveformPlayerProps) {
+export function WaveformPlayer({ src, trackTitle, trackSubtitle, pageUrl }: WaveformPlayerProps) {
+  const audioPlayer = useAudioPlayer();
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
   const bufferRef = useRef<AudioBuffer | null>(null);
   const animRef = useRef<number>(0);
   const progressRef = useRef(0);
   const isDragging = useRef(false);
+  // Blob URL created during decode — passed to context on play; not revoked here
+  const blobUrlRef = useRef<string | null>(null);
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [dur, setDur] = useState(0);
-  const [volume, setVolume] = useState(1);
-  // Blob URL derived from the already-fetched audio data.
-  // The <audio> element uses this instead of the original src so it never needs
-  // to make a separate authenticated request — critical on iOS Safari where the
-  // audio element does not reliably send session cookies for media requests.
-  const [blobSrc, setBlobSrc] = useState<string | null>(null);
+  const [volume, setVolumeState] = useState(1);
+
+  // Derive active/playing state from the global context
+  const isActive = audioPlayer.isCurrentTrack(src);
+  const playing = isActive && audioPlayer.playing;
 
   const redraw = useCallback((progress: number) => {
     const canvas = canvasRef.current;
@@ -85,17 +93,15 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
     }
   }, []);
 
-  // Load + decode waveform data
+  // ── Load + decode waveform data ───────────────────────────────────────────
   useEffect(() => {
     setStatus('loading');
-    setPlaying(false);
     setTime(0);
     setDur(0);
     progressRef.current = 0;
     bufferRef.current = null;
 
     const ctrl = new AbortController();
-    let createdBlobUrl: string | null = null;
 
     (async () => {
       try {
@@ -104,8 +110,7 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
         const ab = await res.arrayBuffer();
         if (ctrl.signal.aborted) return;
 
-        // Clone before decoding: decodeAudioData transfers (detaches) the
-        // ArrayBuffer, so we need a separate copy to create the Blob URL.
+        // Clone before decoding: decodeAudioData transfers (detaches) the ArrayBuffer
         const abForBlob = ab.slice(0);
         const contentType = res.headers.get('content-type') || 'audio/mpeg';
 
@@ -115,19 +120,13 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
         if (ctrl.signal.aborted) return;
 
         bufferRef.current = buf;
-
-        // Duration is known from the decoded buffer — set it immediately so the
-        // timer display is correct even before the audio element fires loadedmetadata.
         setDur(buf.duration);
 
-        // Build a Blob URL from the raw bytes so the <audio> element can play
-        // without making another authenticated network request. On iOS Safari
-        // (PWA and browser), the audio element does not reliably send session
-        // cookies for media src requests; using a local Blob URL avoids that
-        // entirely.
+        // Build a blob URL and hand it to the context when play is pressed.
+        // We intentionally do NOT revoke this URL here — the context owns it
+        // once loadTrack() is called and will revoke when the track changes.
         const blob = new Blob([abForBlob], { type: contentType });
-        createdBlobUrl = URL.createObjectURL(blob);
-        setBlobSrc(createdBlobUrl);
+        blobUrlRef.current = URL.createObjectURL(blob);
 
         setStatus('ready');
       } catch (e) {
@@ -137,14 +136,18 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
 
     return () => {
       ctrl.abort();
-      // Revoke the blob URL when src changes or the component unmounts so the
-      // browser can free the backing memory.
-      if (createdBlobUrl) URL.revokeObjectURL(createdBlobUrl);
-      setBlobSrc(null);
+      // If this track is active in the context, the context owns the blob URL.
+      // Otherwise revoke it now so we don't leak memory.
+      if (blobUrlRef.current && !audioPlayer.isCurrentTrack(src)) {
+        URL.revokeObjectURL(blobUrlRef.current);
+      }
+      blobUrlRef.current = null;
     };
+    // audioPlayer intentionally excluded from deps — only re-run on src change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
-  // Redraw on resize once ready
+  // ── Redraw on resize once ready ───────────────────────────────────────────
   useEffect(() => {
     if (status !== 'ready') return;
     const canvas = canvasRef.current;
@@ -154,11 +157,22 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
     return () => ro.disconnect();
   }, [status, redraw]);
 
-  // Playback animation loop
+  // ── Animation loop — reads from the global audio element when active ──────
   useEffect(() => {
-    if (!playing) return;
+    if (!playing) {
+      // When not playing, keep waveform in sync with global time if active
+      if (isActive) {
+        const t = audioPlayer.audioRef.current?.currentTime ?? 0;
+        const d = audioPlayer.audioRef.current?.duration || dur || 1;
+        progressRef.current = t / d;
+        setTime(t);
+        redraw(t / d);
+      }
+      return;
+    }
+
     const tick = () => {
-      const audio = audioRef.current;
+      const audio = audioPlayer.audioRef.current;
       if (!audio) return;
       const t = audio.currentTime;
       const d = audio.duration || 1;
@@ -169,20 +183,29 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
     };
     animRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animRef.current);
-  }, [playing, redraw]);
+  }, [playing, isActive, dur, redraw, audioPlayer.audioRef]);
 
-  // Global mouse handlers for drag-seek
+  // ── Sync waveform when a different track starts (we become inactive) ──────
+  useEffect(() => {
+    if (!isActive) {
+      progressRef.current = 0;
+      setTime(0);
+      redraw(0);
+    }
+  }, [isActive, redraw]);
+
+  // ── Global mouse handlers for drag-seek ───────────────────────────────────
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
-      if (!isDragging.current) return;
+      if (!isDragging.current || !isActive) return;
       const canvas = canvasRef.current;
-      const audio = audioRef.current;
+      const audio = audioPlayer.audioRef.current;
       if (!canvas || !audio) return;
       const { left, width } = canvas.getBoundingClientRect();
       const p = Math.max(0, Math.min(1, (e.clientX - left) / width));
-      audio.currentTime = p * audio.duration;
+      audioPlayer.seek(p * (audio.duration || 0));
       progressRef.current = p;
-      setTime(p * audio.duration);
+      setTime(p * (audio.duration || 0));
       redraw(p);
     };
 
@@ -194,50 +217,74 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [redraw]);
+  }, [redraw, isActive, audioPlayer]);
+
+  // ── Controls ──────────────────────────────────────────────────────────────
 
   const toggle = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (playing) {
-      audio.pause();
-      setPlaying(false);
+    if (!blobUrlRef.current) return;
+    if (isActive) {
+      audioPlayer.toggle();
     } else {
-      audio.play().catch(() => setPlaying(false));
-      setPlaying(true);
+      // Hand blob URL + metadata to the context — context owns the blob URL from here
+      audioPlayer.loadTrack({
+        src,
+        blobUrl: blobUrlRef.current,
+        title: trackTitle || 'Audio',
+        subtitle: trackSubtitle || '',
+        pageUrl: pageUrl || window.location.pathname,
+      });
+    }
+  };
+
+  const onSkip = (seconds: number) => {
+    if (!isActive) return;
+    audioPlayer.skip(seconds);
+    const audio = audioPlayer.audioRef.current;
+    if (audio) {
+      const t = audio.currentTime;
+      const d = audio.duration || 1;
+      progressRef.current = t / d;
+      setTime(t);
+      redraw(t / d);
     }
   };
 
   const onCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (status !== 'ready') return;
     const canvas = canvasRef.current;
-    const audio = audioRef.current;
-    if (!canvas || !audio) return;
+    const audio = audioPlayer.audioRef.current;
+    if (!canvas) return;
+
+    if (!isActive) {
+      // First click on canvas: start playing this track
+      toggle();
+      return;
+    }
+    if (!audio) return;
+
     isDragging.current = true;
     const { left, width } = canvas.getBoundingClientRect();
     const p = Math.max(0, Math.min(1, (e.clientX - left) / width));
-    audio.currentTime = p * audio.duration;
+    audioPlayer.seek(p * (audio.duration || 0));
     progressRef.current = p;
-    setTime(p * audio.duration);
+    setTime(p * (audio.duration || 0));
     redraw(p);
   };
 
   const onVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = parseFloat(e.target.value);
-    setVolume(v);
-    if (audioRef.current) audioRef.current.volume = v;
+    setVolumeState(v);
+    if (isActive) audioPlayer.setVolume(v);
   };
+
+  // Sync local volume display with global volume when this track becomes active
+  useEffect(() => {
+    if (isActive) setVolumeState(audioPlayer.volume);
+  }, [isActive, audioPlayer.volume]);
 
   return (
     <div className="wfp">
-      <audio
-        ref={audioRef}
-        src={blobSrc ?? undefined}
-        preload="auto"
-        onLoadedMetadata={e => setDur((e.target as HTMLAudioElement).duration)}
-        onEnded={() => { setPlaying(false); progressRef.current = 0; setTime(0); redraw(0); }}
-      />
-
       {/* Top row: play button + waveform */}
       <div className="wfp-top">
         <button
@@ -272,7 +319,7 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
         </div>
       </div>
 
-      {/* Bottom row: volume + time (indented to align under waveform) */}
+      {/* Bottom row: volume + time */}
       <div className="wfp-controls">
         <div className="wfp-volume">
           <svg className="wfp-volume__icon" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -307,11 +354,45 @@ export function WaveformPlayer({ src }: WaveformPlayerProps) {
           />
         </div>
 
-        <span className="wfp-time">
-          <span className="wfp-time-cur">{fmt(time)}</span>
-          <span className="wfp-sep">/</span>
-          <span className="wfp-time-dur">{fmt(dur)}</span>
-        </span>
+        <div className="wfp-right">
+          {/* Skip -10s */}
+          <button
+            className="wfp-skip-btn"
+            type="button"
+            onClick={() => onSkip(-10)}
+            disabled={!isActive}
+            aria-label="Skip back 10 seconds"
+            title="-10s"
+          >
+            <svg width="16" height="16" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+              <path d="M7 1.5a5.5 5.5 0 1 1-5.5 5.5H3A4 4 0 1 0 7 3v-1.5Z" />
+              <path d="M7 1.5V5L9.5 3.25 7 1.5Z" />
+              <text x="7" y="9.5" textAnchor="middle" fontSize="4" fontWeight="700" fontFamily="system-ui">10</text>
+            </svg>
+          </button>
+
+          {/* Skip +10s */}
+          <button
+            className="wfp-skip-btn"
+            type="button"
+            onClick={() => onSkip(10)}
+            disabled={!isActive}
+            aria-label="Skip forward 10 seconds"
+            title="+10s"
+          >
+            <svg width="16" height="16" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+              <path d="M7 1.5a5.5 5.5 0 1 0 5.5 5.5H11A4 4 0 1 1 7 3v-1.5Z" />
+              <path d="M7 1.5V5L4.5 3.25 7 1.5Z" />
+              <text x="7" y="9.5" textAnchor="middle" fontSize="4" fontWeight="700" fontFamily="system-ui">10</text>
+            </svg>
+          </button>
+
+          <span className="wfp-time">
+            <span className="wfp-time-cur">{fmt(time)}</span>
+            <span className="wfp-sep">/</span>
+            <span className="wfp-time-dur">{fmt(dur)}</span>
+          </span>
+        </div>
       </div>
     </div>
   );

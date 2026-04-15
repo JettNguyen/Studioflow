@@ -2,6 +2,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
+import { AudioPlayerProvider } from './context/AudioPlayerContext';
+import { DropZoneProvider } from './context/DropZoneContext';
 import App from './App';
 import './styles.css';
 
@@ -28,7 +30,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           v7_relativeSplatPath: true
         }}
       >
-        <App />
+        <AudioPlayerProvider>
+          <DropZoneProvider>
+            <App />
+          </DropZoneProvider>
+        </AudioPlayerProvider>
       </BrowserRouter>
     </AuthProvider>
   </React.StrictMode>

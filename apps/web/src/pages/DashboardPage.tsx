@@ -153,8 +153,11 @@ export function DashboardPage() {
         fd,
         () => {}
       );
+      // Append a timestamp so the browser fetches the new image instead of
+      // serving the old one from cache (the URL path is the same after re-upload).
+      const bust = `?t=${Date.now()}`;
       setProjects(prev => prev.map(p => p.id === projectId
-        ? { ...p, coverImageUrl: updated.coverImageUrl }
+        ? { ...p, coverImageUrl: updated.coverImageUrl ? updated.coverImageUrl + bust : updated.coverImageUrl }
         : p
       ));
     } catch {

@@ -52,7 +52,15 @@ export function ProfilePage() {
     fd.append('image', file);
     try {
       const response = await apiUpload<AuthSessionResponse>('/auth/me/avatar', fd);
-      setUser(response.user);
+      if (response.user) {
+        // Cache-bust so the browser fetches the new image instead of serving the
+        // old one from cache (the avatar URL path is the same after re-upload).
+        const u = response.user;
+        setUser({
+          ...u,
+          avatarUrl: u.avatarUrl ? `${u.avatarUrl}?t=${Date.now()}` : u.avatarUrl,
+        });
+      }
     } catch (err) {
       setAvatarError(err instanceof Error ? err.message : 'Upload failed');
     } finally {

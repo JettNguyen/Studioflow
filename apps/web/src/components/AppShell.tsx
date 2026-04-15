@@ -1,12 +1,16 @@
 import { useEffect } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { useAudioPlayer } from '../context/AudioPlayerContext';
 import { apiRequest, resolveApiUrl } from '../lib/api';
+import { DragDropOverlay } from './DragDropOverlay';
 import { InstallPrompt } from './InstallPrompt';
+import { PersistentPlayer } from './PersistentPlayer';
 import './AppShell.css';
 
 export function AppShell() {
   const { user } = useAuth();
+  const { currentTrack } = useAudioPlayer();
 
   // Silently repair any broken Drive folders on every authenticated load.
   // Only runs if the user has a Google Drive connection.
@@ -23,7 +27,7 @@ export function AppShell() {
     : '?';
 
   return (
-    <div>
+    <div data-player={currentTrack ? 'visible' : 'hidden'}>
       <header className="topbar">
 
         {/* Logo — always far left, never wraps */}
@@ -73,6 +77,8 @@ export function AppShell() {
         <Outlet />
       </main>
 
+      <PersistentPlayer />
+      <DragDropOverlay />
       <InstallPrompt />
     </div>
   );
