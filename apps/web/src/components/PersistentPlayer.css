@@ -271,9 +271,10 @@
 @media (max-width: 640px) {
   .pp {
     gap: 8px;
-    padding: 0 12px;
-    padding-bottom: env(safe-area-inset-bottom);
-    height: 64px;
+    padding: 8px 12px;
+    min-height: 74px;
+    height: auto;
+    bottom: calc(env(safe-area-inset-bottom) + 8px);
   }
 
   /* Hide volume on mobile */
