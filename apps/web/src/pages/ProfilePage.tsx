@@ -1,10 +1,8 @@
 import type { AuthSessionResponse, DriveConnectionStatus, ProjectSummary } from '@studioflow/shared';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { apiRequest, apiUpload, resolveApiUrl } from '../lib/api';
+import { apiRequest, apiUpload, getGoogleAuthUrl, resolveApiUrl } from '../lib/api';
 import './ProfilePage.css';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
 
 export function ProfilePage() {
   const { user, logout, setUser } = useAuth();
@@ -28,6 +26,16 @@ export function ProfilePage() {
       .then(setProjects)
       .catch(() => {/* non-critical */});
   }, []);
+
+  useEffect(() => {
+    if (!avatarUploading) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [avatarUploading]);
 
   const retrySync = async (projectId: string) => {
     setSyncing(s => ({ ...s, [projectId]: true }));
@@ -173,7 +181,7 @@ export function ProfilePage() {
           {/* ?reauth=1 forces Google consent screen so a fresh refresh token is issued */}
           <a
             className="btn btn-ghost btn-sm"
-            href={`${API_BASE}/auth/google?reauth=1`}
+            href={`${getGoogleAuthUrl()}?reauth=1`}
           >
             {driveStatus?.connected ? 'Reconnect' : 'Connect Drive'}
           </a>

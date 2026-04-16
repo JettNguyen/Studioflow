@@ -70,6 +70,13 @@ function extractOriginalNameFromStorageKey(storageKey: string | null): string | 
   return baseName.replace(/^\d+-[a-f0-9]+-/, '');
 }
 
+function getFileExtension(fileName: string | null): string {
+  if (!fileName) return '';
+  const idx = fileName.lastIndexOf('.');
+  if (idx <= 0 || idx === fileName.length - 1) return '';
+  return fileName.slice(idx);
+}
+
 async function findDriveAccountsForProject(userId: string, projectId: string, ownerId: string) {
   const memberships = await prisma.projectMembership.findMany({
     where: { projectId },
@@ -97,9 +104,16 @@ async function findDriveAccountsForProject(userId: string, projectId: string, ow
 async function recoverDriveFileId(asset: Awaited<ReturnType<typeof findAuthorizedAsset>>, userId: string) {
   if (!asset?.song.driveFolderId) return null;
 
+  const originalName = extractOriginalNameFromStorageKey(asset.storageKey);
+  const originalExt = getFileExtension(originalName);
+  const versionedBaseName = `${asset.name} (v${asset.versionNumber})`;
+  const versionedWithExt = originalExt ? `${versionedBaseName}${originalExt}` : null;
+
   const candidates = [
     asset.name,
-    extractOriginalNameFromStorageKey(asset.storageKey)
+    versionedBaseName,
+    versionedWithExt,
+    originalName
   ].filter(Boolean) as string[];
 
   const accounts = await findDriveAccountsForProject(
@@ -265,6 +279,33 @@ assetRouter.get('/:assetId/stream', async (req, res) => {
         console.error('[Drive stream error]', drivePlan.driveFileId, googleAccount.userId, err);
       }
     }
+
+    const recovered = await recoverDriveFileId(asset, req.user!.id);
+    if (recovered?.driveFileId && recovered.driveFileId !== drivePlan.driveFileId) {
+      for (const googleAccount of drivePlan.accounts) {
+        try {
+          const driveObject = await getDriveFileStream(googleAccount, recovered.driveFileId, range);
+          res.setHeader('Content-Type', driveObject.mimeType || asset.type || 'application/octet-stream');
+          res.setHeader('Accept-Ranges', 'bytes');
+
+          if (driveObject.contentRange) {
+            res.status(206);
+            res.setHeader('Content-Range', driveObject.contentRange);
+          }
+
+          if (typeof driveObject.contentLength === 'number' && Number.isFinite(driveObject.contentLength)) {
+            res.setHeader('Content-Length', driveObject.contentLength.toString());
+          } else if (!range && typeof driveObject.size === 'number' && Number.isFinite(driveObject.size)) {
+            res.setHeader('Content-Length', driveObject.size.toString());
+          }
+
+          driveObject.stream.pipe(res);
+          return;
+        } catch (err) {
+          console.error('[Drive stream recovery error]', recovered.driveFileId, googleAccount.userId, err);
+        }
+      }
+    }
   }
 
   console.error('[Stream error] Asset not found in any location:', asset.storageKey);
@@ -319,6 +360,21 @@ assetRouter.get('/:assetId/download', async (req, res) => {
         return;
       } catch (err) {
         console.error('[Drive download error]', drivePlan.driveFileId, googleAccount.userId, err);
+      }
+    }
+
+    const recovered = await recoverDriveFileId(asset, req.user!.id);
+    if (recovered?.driveFileId && recovered.driveFileId !== drivePlan.driveFileId) {
+      for (const googleAccount of drivePlan.accounts) {
+        try {
+          const driveObject = await getDriveFileStream(googleAccount, recovered.driveFileId);
+          res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
+          res.setHeader('Content-Type', driveObject.mimeType || asset.type || 'application/octet-stream');
+          driveObject.stream.pipe(res);
+          return;
+        } catch (err) {
+          console.error('[Drive download recovery error]', recovered.driveFileId, googleAccount.userId, err);
+        }
       }
     }
   }

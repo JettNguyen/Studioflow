@@ -120,6 +120,16 @@ export function ProjectPage() {
     return () => document.removeEventListener('click', handleClick);
   }, [openOverflowId]);
 
+  useEffect(() => {
+    if (!miscUploading) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [miscUploading]);
+
   const getOverflowAlign = (element: HTMLElement): 'left' | 'right' => {
     const menuWidth = 160;
     const rect = element.getBoundingClientRect();

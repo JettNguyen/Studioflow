@@ -206,6 +206,13 @@ authRouter.post('/me/avatar', requireAuth, uploadImage.single('image'), async (r
   const localFilePath = resolveStoredFilePath(req.file.filename);
   let storageKey = req.file.filename;
 
+  if (!env.s3Enabled && env.nodeEnv === 'production') {
+    await unlink(localFilePath).catch(() => undefined);
+    return res.status(503).json({
+      message: 'Avatar storage is not configured for persistence. Please contact support to enable object storage.'
+    });
+  }
+
   try {
     if (env.s3Enabled) {
       const s3Key = buildS3ObjectKey({ userId: req.user!.id, songId: 'avatar', fileName: req.file.originalname });

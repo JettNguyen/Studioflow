@@ -267,6 +267,16 @@ export function SongWorkspacePage() {
       .catch(e => setError(e instanceof Error ? e.message : 'Unable to load song'));
   }, [songId]);
 
+  useEffect(() => {
+    if (!uploading) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [uploading]);
+
 
   const refreshSong = async () => {
     if (!songId) return;
@@ -293,8 +303,12 @@ export function SongWorkspacePage() {
         fd.append('category', assetCategory);
         if (isSingle && assetName.trim()) fd.append('name', assetName.trim());
         if (assetVersionGroup.trim()) fd.append('versionGroup', assetVersionGroup.trim());
-        const dur = await readFileDuration(file);
-        if (dur) fd.append('duration', dur);
+        // Only derive duration client-side for audio; large video metadata reads
+        // can stall the upload start on some devices/browsers.
+        if (file.type.startsWith('audio/')) {
+          const dur = await readFileDuration(file);
+          if (dur) fd.append('duration', dur);
+        }
         if (isSingle && assetCategory === 'Song Audio' && detectedFeatures) {
           if (detectedFeatures.key) fd.append('detectedKey', detectedFeatures.key);
           if (detectedFeatures.bpm !== null) fd.append('detectedBpm', String(detectedFeatures.bpm));

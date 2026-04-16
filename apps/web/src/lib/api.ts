@@ -62,12 +62,20 @@ export function apiUploadWithProgress<T>(
     xhr.open('POST', `${uploadBaseUrl}${path}`);
     xhr.withCredentials = true;
 
+    onProgress(1);
+
     xhr.upload.addEventListener('progress', e => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      if (e.lengthComputable) {
+        onProgress(Math.max(1, Math.round((e.loaded / e.total) * 100)));
+      } else {
+        // Some browsers/media sources don't expose total bytes; keep UI alive.
+        onProgress(5);
+      }
     });
 
     xhr.addEventListener('load', () => {
       if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress(100);
         try { resolve(JSON.parse(xhr.responseText) as T); }
         catch { reject(new Error('Invalid response')); }
       } else {

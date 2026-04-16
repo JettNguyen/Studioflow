@@ -118,6 +118,27 @@ function parseBpmFromText(value: string | null) {
   return Math.round(parsed);
 }
 
+async function findDriveUploadAccountsForSong(userId: string, projectId: string, ownerId: string) {
+  const memberships = await prisma.projectMembership.findMany({
+    where: { projectId },
+    select: { userId: true }
+  });
+
+  const orderedIds = Array.from(new Set([userId, ownerId, ...memberships.map((m) => m.userId)]));
+  const accounts = await prisma.oAuthAccount.findMany({
+    where: {
+      provider: 'google',
+      userId: { in: orderedIds },
+      refreshToken: { not: null }
+    }
+  });
+
+  const byUserId = new Map(accounts.map((a) => [a.userId, a]));
+  return orderedIds
+    .map((id) => byUserId.get(id))
+    .filter((account): account is (typeof accounts)[number] => Boolean(account));
+}
+
 songRouter.use(requireAuth);
 
 songRouter.post('/project/:projectId', async (req, res) => {
@@ -527,6 +548,11 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
           }
         }
       }
+    },
+    include: {
+      project: {
+        select: { createdById: true }
+      }
     }
   });
 
@@ -570,14 +596,9 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
 
   const nextVersionNumber = previousVersion ? previousVersion.versionNumber + 1 : 1;
 
-  const googleAccount = song.driveFolderId
-    ? await prisma.oAuthAccount.findFirst({
-      where: {
-        userId: req.user!.id,
-        provider: 'google'
-      }
-    })
-    : null;
+  const driveUploadAccounts = song.driveFolderId
+    ? await findDriveUploadAccountsForSong(req.user!.id, song.projectId, song.project.createdById)
+    : [];
 
   const localFilePath = resolveStoredFilePath(req.file.filename);
   let storageKey = req.file.filename;
@@ -657,7 +678,14 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
     }
   }
 
-  const shouldUploadToDrive = Boolean(song.driveFolderId && googleAccount);
+  const shouldUploadToDrive = Boolean(song.driveFolderId && driveUploadAccounts.length > 0);
+
+  if (!env.s3Enabled && !shouldUploadToDrive) {
+    await unlink(localFilePath).catch(() => undefined);
+    return res.status(503).json({
+      message: 'No durable upload backend is currently available. Connect Google Drive or enable S3 storage and retry.'
+    });
+  }
   const driveFolderId = song.driveFolderId;
   const uploadMimeType = req.file.mimetype;
   const uploadOriginalName = req.file.originalname;
@@ -748,27 +776,47 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
 
   // Drive upload is intentionally async so large files don't keep the HTTP request
   // open long enough to trigger 502 gateway timeouts.
-  if (shouldUploadToDrive && driveFolderId && googleAccount) {
+  if (shouldUploadToDrive && driveFolderId) {
     Promise.resolve()
       .then(async () => {
-        const categoryFolderId = await ensureSongCategoryFolder(
-          googleAccount,
-          parsedMetadata.data.category,
-          driveFolderId
-        );
+        let uploadedDriveFileId: string | null = null;
+        for (const googleAccount of driveUploadAccounts) {
+          try {
+            const categoryFolderId = await ensureSongCategoryFolder(
+              googleAccount,
+              parsedMetadata.data.category,
+              driveFolderId
+            );
 
-        const uploadedDriveFileId = await uploadDriveFile(googleAccount, {
-          localFilePath,
-          name: `${inputAssetName} (v${nextVersionNumber})`,
-          mimeType: uploadMimeType,
-          parentFolderId: categoryFolderId
-        });
+            uploadedDriveFileId = await uploadDriveFile(googleAccount, {
+              localFilePath,
+              name: `${inputAssetName} (v${nextVersionNumber})`,
+              mimeType: uploadMimeType,
+              parentFolderId: categoryFolderId
+            });
+
+            if (uploadedDriveFileId) {
+              break;
+            }
+          } catch (driveErr) {
+            console.error('Drive upload attempt failed for asset', {
+              songId,
+              assetId: asset.id,
+              uploaderUserId: googleAccount.userId,
+              file: uploadOriginalName,
+              err: driveErr
+            });
+          }
+        }
 
         if (uploadedDriveFileId) {
           await prisma.asset.update({
             where: { id: asset.id },
             data: { driveFileId: uploadedDriveFileId }
           });
+        } else if (!env.s3Enabled) {
+          // Avoid leaving a DB record that points to ephemeral local storage only.
+          await prisma.asset.delete({ where: { id: asset.id } }).catch(() => undefined);
         }
       })
       .catch((driveErr) => {
