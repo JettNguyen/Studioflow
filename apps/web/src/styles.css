@@ -340,6 +340,24 @@ select option {
   border-color: rgba(46, 207, 94, 0.25);
 }
 
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 10px;
+}
+
+.status-dot--released {
+  background: #2ecf5e;
+  box-shadow: 0 0 0 1px rgba(46, 207, 94, 0.22);
+}
+
+.status-dot--unreleased {
+  background: #f0a43a;
+  box-shadow: 0 0 0 1px rgba(240, 164, 58, 0.22);
+}
+
 /* Released state button */
 .btn.released {
   background: rgba(46, 207, 94, 0.06);

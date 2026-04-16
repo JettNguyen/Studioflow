@@ -665,7 +665,11 @@ export function ProjectPage() {
                 </div>
                 <div className="song-row__stats">
                   <span className="song-row__stat">{song.assetCount} {song.assetCount === 1 ? 'asset' : 'assets'}</span>
-                  <span className={`badge ${song.released ? 'badge-green' : 'badge-default'}`}>{song.released ? 'Released' : 'Unreleased'}</span>
+                  <span
+                    className={`status-dot ${song.released ? 'status-dot--released' : 'status-dot--unreleased'}`}
+                    title={song.released ? 'Released' : 'Unreleased'}
+                    aria-label={song.released ? 'Released' : 'Unreleased'}
+                  />
                   {song.taskOpenCount > 0 && (
                     <span className="badge badge-amber">{song.taskOpenCount} open</span>
                   )}

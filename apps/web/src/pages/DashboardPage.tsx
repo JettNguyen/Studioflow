@@ -67,9 +67,11 @@ function ProjectCard({ project, onCoverUpload, uploadingCover }: ProjectCardProp
           </div>
 
           <div className="project-card__meta-col">
-            <span className={`badge ${project.released ? 'badge-green' : 'badge-default'}`}>
-              {project.released ? 'Released' : 'Unreleased'}
-            </span>
+            <span
+              className={`status-dot ${project.released ? 'status-dot--released' : 'status-dot--unreleased'}`}
+              title={project.released ? 'Released' : 'Unreleased'}
+              aria-label={project.released ? 'Released' : 'Unreleased'}
+            />
             <span className="project-card__collab">
               {project.collaboratorCount === 1 ? '1 collaborator' : `${project.collaboratorCount} collaborators`}
             </span>

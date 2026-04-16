@@ -319,6 +319,9 @@
   align-items: stretch;
   background: var(--surface-raised);
   border-bottom: 1px solid var(--border);
+  border-top-left-radius: var(--r-3);
+  border-top-right-radius: var(--r-3);
+  overflow: hidden;
 }
 
 /* When collapsed the border-bottom should go away */
