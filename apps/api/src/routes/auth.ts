@@ -166,35 +166,33 @@ authRouter.get('/me/avatar', requireAuth, async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
   if (!user?.avatarStorageKey) return res.status(404).json({ message: 'No avatar' });
 
-  if (isS3StorageKey(user.avatarStorageKey)) {
+  // Prefer S3 when enabled, regardless of whether the DB key is prefixed.
+  // This keeps avatar rendering consistent across devices/sessions where local
+  // files may no longer exist.
+  if (env.s3Enabled) {
     try {
-      const obj = await getS3Object(user.avatarStorageKey);
-      res.setHeader('Content-Type', obj.ContentType || 'image/jpeg');
+      const { object, resolvedStorageKey } = await getS3ObjectWithLegacyFallback(user.avatarStorageKey);
+
+      // Self-heal legacy/plain keys so future requests avoid fallback probes.
+      if (resolvedStorageKey !== user.avatarStorageKey) {
+        void prisma.user.update({
+          where: { id: user.id },
+          data: { avatarStorageKey: resolvedStorageKey }
+        }).catch(() => undefined);
+      }
+
+      res.setHeader('Content-Type', object.ContentType || 'image/jpeg');
       res.setHeader('Cache-Control', 'private, max-age=86400');
-      (obj.Body as NodeJS.ReadableStream).pipe(res);
+      (object.Body as NodeJS.ReadableStream).pipe(res);
+      return;
     } catch (err) {
       console.error('[S3 avatar error]', user.avatarStorageKey, err);
-      return res.status(404).json({ message: 'Avatar not found in storage' });
+      // Fall through to local lookup for legacy local-only avatars.
     }
-    return;
   }
 
   const fullPath = resolveStoredFilePath(user.avatarStorageKey);
-  if (!existsSync(fullPath)) {
-    if (env.s3Enabled) {
-      try {
-        const { object } = await getS3ObjectWithLegacyFallback(user.avatarStorageKey);
-        res.setHeader('Content-Type', object.ContentType || 'image/jpeg');
-        res.setHeader('Cache-Control', 'private, max-age=86400');
-        (object.Body as NodeJS.ReadableStream).pipe(res);
-        return;
-      } catch {
-        // Fall through to local not found response.
-      }
-    }
-
-    return res.status(404).json({ message: 'Avatar not found' });
-  }
+  if (!existsSync(fullPath)) return res.status(404).json({ message: 'Avatar not found' });
 
   res.setHeader('Content-Type', 'image/jpeg');
   res.setHeader('Cache-Control', 'private, max-age=86400');

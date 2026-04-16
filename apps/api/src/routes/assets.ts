@@ -6,7 +6,7 @@ import { env } from '../config.js';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { resolveStoredFilePath } from '../storage/localStorage.js';
-import { deleteDriveFile, getDriveFileStream } from '../utils/drive.js';
+import { deleteDriveFile, findSongAssetDriveFileId, getDriveFileStream } from '../utils/drive.js';
 import {
   deleteS3Object,
   getS3ObjectWithLegacyFallback,
@@ -39,8 +39,114 @@ async function findAuthorizedAsset(assetId: string, userId: string) {
           }
         }
       }
+    },
+    include: {
+      song: {
+        select: {
+          id: true,
+          projectId: true,
+          driveFolderId: true,
+          project: {
+            select: { createdById: true }
+          }
+        }
+      }
     }
   });
+}
+
+function toDriveCategoryLabel(prismaCategory: string): string {
+  if (prismaCategory === 'SongAudio') return 'Song Audio';
+  if (prismaCategory === 'SocialMediaContent') return 'Social Media Content';
+  if (prismaCategory === 'Videos') return 'Videos';
+  if (prismaCategory === 'Beat') return 'Beat';
+  if (prismaCategory === 'Stems') return 'Stems';
+  return prismaCategory;
+}
+
+function extractOriginalNameFromStorageKey(storageKey: string | null): string | null {
+  if (!storageKey) return null;
+  const baseName = storageKey.split('/').pop() ?? storageKey;
+  return baseName.replace(/^\d+-[a-f0-9]+-/, '');
+}
+
+async function findDriveAccountsForProject(userId: string, projectId: string, ownerId: string) {
+  const memberships = await prisma.projectMembership.findMany({
+    where: { projectId },
+    select: { userId: true }
+  });
+
+  const orderedIds = Array.from(new Set([userId, ownerId, ...memberships.map((m) => m.userId)]));
+  const accounts = await prisma.oAuthAccount.findMany({
+    where: {
+      provider: 'google',
+      userId: { in: orderedIds },
+      refreshToken: { not: null }
+    }
+  });
+
+  const byUserId = new Map(accounts.map((a) => [a.userId, a]));
+  const orderedAccounts: typeof accounts = [];
+  for (const id of orderedIds) {
+    const account = byUserId.get(id);
+    if (account) orderedAccounts.push(account);
+  }
+  return orderedAccounts;
+}
+
+async function recoverDriveFileId(asset: Awaited<ReturnType<typeof findAuthorizedAsset>>, userId: string) {
+  if (!asset?.song.driveFolderId) return null;
+
+  const candidates = [
+    asset.name,
+    extractOriginalNameFromStorageKey(asset.storageKey)
+  ].filter(Boolean) as string[];
+
+  const accounts = await findDriveAccountsForProject(
+    userId,
+    asset.song.projectId,
+    asset.song.project.createdById
+  );
+
+  for (const account of accounts) {
+    let foundId: string | null = null;
+    try {
+      foundId = await findSongAssetDriveFileId(
+        account,
+        asset.song.driveFolderId,
+        toDriveCategoryLabel(asset.category),
+        candidates
+      );
+    } catch {
+      // Account may not have access to this folder; try next account.
+      foundId = null;
+    }
+
+    if (foundId) {
+      await prisma.asset.update({
+        where: { id: asset.id },
+        data: { driveFileId: foundId }
+      });
+      return { driveFileId: foundId, account };
+    }
+  }
+
+  return null;
+}
+
+async function getDriveAccessPlan(asset: NonNullable<Awaited<ReturnType<typeof findAuthorizedAsset>>>, userId: string) {
+  const accounts = await findDriveAccountsForProject(
+    userId,
+    asset.song.projectId,
+    asset.song.project.createdById
+  );
+
+  if (asset.driveFileId) {
+    return { driveFileId: asset.driveFileId, accounts };
+  }
+
+  const recovered = await recoverDriveFileId(asset, userId);
+  return { driveFileId: recovered?.driveFileId ?? null, accounts };
 }
 
 function toPrismaAssetCategory(category: string) {
@@ -65,14 +171,14 @@ function slugifyVersionGroup(value: string) {
 assetRouter.get('/:assetId/stream', async (req, res) => {
   const asset = await findAuthorizedAsset(req.params.assetId, req.user!.id);
 
-  if (!asset || !asset.storageKey) {
+  if (!asset) {
     return res.status(404).json({ message: 'Asset not found' });
   }
 
   const range = typeof req.headers.range === 'string' ? req.headers.range : undefined;
 
   // S3 path: handles both explicit s3: keys and legacy keys when S3 is enabled
-  if (isS3StorageKey(asset.storageKey) || env.s3Enabled) {
+  if (asset.storageKey && (isS3StorageKey(asset.storageKey) || env.s3Enabled)) {
     try {
       const { object } = await getS3ObjectWithRangeLegacyFallback(asset.storageKey, range);
       const body = object.Body;
@@ -98,17 +204,14 @@ assetRouter.get('/:assetId/stream', async (req, res) => {
       (body as NodeJS.ReadableStream).pipe(res);
       return;
     } catch (err) {
-      if (isS3StorageKey(asset.storageKey)) {
-        console.error('[S3 stream error]', asset.storageKey, err);
-        return res.status(404).json({ message: 'Asset not found in storage' });
-      }
-      // Legacy (non-s3:) key: fall through to local / Drive
+      console.error('[S3 stream error]', asset.storageKey, err);
+      // Fall through to local / Drive fallback.
     }
   }
 
   // Local file path
-  const fullPath = resolveStoredFilePath(asset.storageKey);
-  if (existsSync(fullPath)) {
+  const fullPath = asset.storageKey ? resolveStoredFilePath(asset.storageKey) : null;
+  if (fullPath && existsSync(fullPath)) {
     const fileSize = statSync(fullPath).size;
 
     if (range) {
@@ -136,27 +239,31 @@ assetRouter.get('/:assetId/stream', async (req, res) => {
     return;
   }
 
-  // Drive fallback
-  if (asset.driveFileId) {
-    try {
-      const googleAccount = await prisma.oAuthAccount.findFirst({
-        where: { userId: req.user!.id, provider: 'google' }
-      });
-
-      if (googleAccount) {
-        const driveObject = await getDriveFileStream(googleAccount, asset.driveFileId, range);
+  // Drive fallback (including recovery for older assets missing driveFileId)
+  const drivePlan = await getDriveAccessPlan(asset, req.user!.id);
+  if (drivePlan.driveFileId) {
+    for (const googleAccount of drivePlan.accounts) {
+      try {
+        const driveObject = await getDriveFileStream(googleAccount, drivePlan.driveFileId, range);
         res.setHeader('Content-Type', driveObject.mimeType || asset.type || 'application/octet-stream');
         res.setHeader('Accept-Ranges', 'bytes');
 
-        if (typeof driveObject.size === 'number' && Number.isFinite(driveObject.size)) {
+        if (driveObject.contentRange) {
+          res.status(206);
+          res.setHeader('Content-Range', driveObject.contentRange);
+        }
+
+        if (typeof driveObject.contentLength === 'number' && Number.isFinite(driveObject.contentLength)) {
+          res.setHeader('Content-Length', driveObject.contentLength.toString());
+        } else if (!range && typeof driveObject.size === 'number' && Number.isFinite(driveObject.size)) {
           res.setHeader('Content-Length', driveObject.size.toString());
         }
 
         driveObject.stream.pipe(res);
         return;
+      } catch (err) {
+        console.error('[Drive stream error]', drivePlan.driveFileId, googleAccount.userId, err);
       }
-    } catch (err) {
-      console.error('[Drive stream error]', asset.driveFileId, err);
     }
   }
 
@@ -167,12 +274,12 @@ assetRouter.get('/:assetId/stream', async (req, res) => {
 assetRouter.get('/:assetId/download', async (req, res) => {
   const asset = await findAuthorizedAsset(req.params.assetId, req.user!.id);
 
-  if (!asset || !asset.storageKey) {
+  if (!asset) {
     return res.status(404).json({ message: 'Asset not found' });
   }
 
   // S3 path
-  if (isS3StorageKey(asset.storageKey) || env.s3Enabled) {
+  if (asset.storageKey && (isS3StorageKey(asset.storageKey) || env.s3Enabled)) {
     try {
       const { object } = await getS3ObjectWithLegacyFallback(asset.storageKey);
       const body = object.Body;
@@ -186,39 +293,33 @@ assetRouter.get('/:assetId/download', async (req, res) => {
       (body as NodeJS.ReadableStream).pipe(res);
       return;
     } catch (err) {
-      if (isS3StorageKey(asset.storageKey)) {
-        console.error('[S3 download error]', asset.storageKey, err);
-        return res.status(404).json({ message: 'Asset not found in storage' });
-      }
-      // Legacy key: fall through to local / Drive
+      console.error('[S3 download error]', asset.storageKey, err);
+      // Fall through to local / Drive fallback.
     }
   }
 
   // Local file path
-  const fullPath = resolveStoredFilePath(asset.storageKey);
-  if (existsSync(fullPath)) {
+  const fullPath = asset.storageKey ? resolveStoredFilePath(asset.storageKey) : null;
+  if (fullPath && existsSync(fullPath)) {
     res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
     res.setHeader('Content-Type', asset.type || 'application/octet-stream');
     createReadStream(fullPath).pipe(res);
     return;
   }
 
-  // Drive fallback
-  if (asset.driveFileId) {
-    try {
-      const googleAccount = await prisma.oAuthAccount.findFirst({
-        where: { userId: req.user!.id, provider: 'google' }
-      });
-
-      if (googleAccount) {
-        const driveObject = await getDriveFileStream(googleAccount, asset.driveFileId);
+  // Drive fallback (including recovery for older assets missing driveFileId)
+  const drivePlan = await getDriveAccessPlan(asset, req.user!.id);
+  if (drivePlan.driveFileId) {
+    for (const googleAccount of drivePlan.accounts) {
+      try {
+        const driveObject = await getDriveFileStream(googleAccount, drivePlan.driveFileId);
         res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
         res.setHeader('Content-Type', driveObject.mimeType || asset.type || 'application/octet-stream');
         driveObject.stream.pipe(res);
         return;
+      } catch (err) {
+        console.error('[Drive download error]', drivePlan.driveFileId, googleAccount.userId, err);
       }
-    } catch (err) {
-      console.error('[Drive download error]', asset.driveFileId, err);
     }
   }
 

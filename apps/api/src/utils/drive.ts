@@ -72,6 +72,28 @@ async function findOrCreateDriveFolder(
   return createDriveFolder(account, folderName, parentFolderId);
 }
 
+async function findDriveFileIdByName(
+  account: OAuthAccount,
+  fileName: string,
+  parentFolderId: string
+) {
+  const oauthClient = getAuthorizedClient(account);
+  const drive = google.drive({ version: 'v3', auth: oauthClient });
+
+  const response = await drive.files.list({
+    q: [
+      `trashed=false`,
+      `name='${escapeDriveQueryValue(fileName)}'`,
+      `'${escapeDriveQueryValue(parentFolderId)}' in parents`
+    ].join(' and '),
+    pageSize: 1,
+    orderBy: 'createdTime desc',
+    fields: 'files(id,name)'
+  });
+
+  return response.data.files?.[0]?.id ?? null;
+}
+
 export async function ensureStudioflowRootFolder(account: OAuthAccount) {
   return findOrCreateDriveFolder(account, 'Studioflow');
 }
@@ -117,6 +139,36 @@ export async function ensureSongCategoryFolder(
   if (!folderName) return songDriveFolderId;
   const subFolderId = await findOrCreateDriveFolder(account, folderName, songDriveFolderId);
   return subFolderId ?? songDriveFolderId;
+}
+
+/**
+ * Tries to locate a song asset file in Drive by exact name.
+ * Searches the category subfolder first (if it exists), then the song root.
+ */
+export async function findSongAssetDriveFileId(
+  account: OAuthAccount,
+  songDriveFolderId: string,
+  category: string,
+  candidateFileNames: string[]
+): Promise<string | null> {
+  const uniqueCandidates = Array.from(new Set(candidateFileNames.map((n) => n.trim()).filter(Boolean)));
+  if (!uniqueCandidates.length) return null;
+
+  const folderName = categoryToDriveFolderName(category);
+  const categoryFolderId = folderName
+    ? await findDriveFolderId(account, folderName, songDriveFolderId)
+    : null;
+
+  const parentFolderIds = [categoryFolderId, songDriveFolderId].filter(Boolean) as string[];
+
+  for (const parentFolderId of parentFolderIds) {
+    for (const candidate of uniqueCandidates) {
+      const found = await findDriveFileIdByName(account, candidate, parentFolderId);
+      if (found) return found;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -223,6 +275,10 @@ export async function getDriveFileStream(account: OAuthAccount, driveFileId: str
     stream: mediaRes.data as NodeJS.ReadableStream,
     mimeType: metaRes.data.mimeType || undefined,
     size: typeof metaRes.data.size === 'string' ? Number.parseInt(metaRes.data.size, 10) : undefined,
-    name: metaRes.data.name || undefined
+    name: metaRes.data.name || undefined,
+    contentRange: typeof mediaRes.headers?.['content-range'] === 'string' ? mediaRes.headers['content-range'] : undefined,
+    contentLength: typeof mediaRes.headers?.['content-length'] === 'string'
+      ? Number.parseInt(mediaRes.headers['content-length'], 10)
+      : undefined
   };
 }

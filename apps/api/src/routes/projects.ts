@@ -432,35 +432,32 @@ projectRouter.get('/:projectId/cover', async (req, res) => {
   const project = await prisma.project.findUnique({ where: { id: paramToString(req.params.projectId) } });
   if (!project?.coverImageKey) return res.status(404).json({ message: 'No cover image' });
 
-  if (isS3StorageKey(project.coverImageKey)) {
+  // Prefer S3 when enabled, even for legacy/plain keys, to keep covers
+  // available across devices/sessions where local files may be absent.
+  if (env.s3Enabled) {
     try {
-      const obj = await getS3Object(project.coverImageKey);
-      res.setHeader('Content-Type', obj.ContentType || 'image/jpeg');
+      const { object, resolvedStorageKey } = await getS3ObjectWithLegacyFallback(project.coverImageKey);
+
+      // Self-heal cover key to canonical s3: form when a legacy candidate matches.
+      if (resolvedStorageKey !== project.coverImageKey) {
+        void prisma.project.update({
+          where: { id: project.id },
+          data: { coverImageKey: resolvedStorageKey }
+        }).catch(() => undefined);
+      }
+
+      res.setHeader('Content-Type', object.ContentType || 'image/jpeg');
       res.setHeader('Cache-Control', 'private, max-age=86400');
-      (obj.Body as NodeJS.ReadableStream).pipe(res);
+      (object.Body as NodeJS.ReadableStream).pipe(res);
+      return;
     } catch (err) {
       console.error('[S3 cover error]', project.coverImageKey, err);
-      return res.status(404).json({ message: 'Cover image not found in storage' });
+      // Fall through to local lookup for local-only historical covers.
     }
-    return;
   }
 
   const fullPath = resolveStoredFilePath(project.coverImageKey);
-  if (!existsSync(fullPath)) {
-    if (env.s3Enabled) {
-      try {
-        const { object } = await getS3ObjectWithLegacyFallback(project.coverImageKey);
-        res.setHeader('Content-Type', object.ContentType || 'image/jpeg');
-        res.setHeader('Cache-Control', 'private, max-age=86400');
-        (object.Body as NodeJS.ReadableStream).pipe(res);
-        return;
-      } catch {
-        // Fall through to local not found response.
-      }
-    }
-
-    return res.status(404).json({ message: 'Cover image not found' });
-  }
+  if (!existsSync(fullPath)) return res.status(404).json({ message: 'Cover image not found' });
 
   res.setHeader('Content-Type', 'image/jpeg');
   res.setHeader('Cache-Control', 'private, max-age=86400');
