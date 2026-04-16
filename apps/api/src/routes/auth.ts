@@ -13,15 +13,30 @@ import { resolveStoredFilePath, uploadImage } from '../storage/localStorage.js';
 import {
   buildS3ObjectKey,
   deleteS3Object,
-  getS3Object,
   getS3ObjectWithLegacyFallback,
   isS3StorageKey,
   uploadFileToS3
 } from '../storage/s3Storage.js';
-import { getGrantedScopes } from '../utils/drive.js';
+import {
+  deleteDriveFile,
+  getDriveFileStream,
+  getGrantedScopes,
+  ensureStudioflowRootFolder,
+  uploadDriveFile
+} from '../utils/drive.js';
 import { mapAuthUser } from '../utils/mappers.js';
 
 export const authRouter = Router();
+
+function isDriveStorageKey(value: string | null | undefined): value is string {
+  return typeof value === 'string' && value.startsWith('drive:');
+}
+
+function parseDriveFileId(storageKey: string | null | undefined): string | null {
+  if (!isDriveStorageKey(storageKey)) return null;
+  const id = storageKey.slice('drive:'.length).trim();
+  return id || null;
+}
 
 function establishSession(req: Request, res: Response, userId: string, onSuccess: () => void) {
   req.session.userId = userId;
@@ -166,6 +181,27 @@ authRouter.get('/me/avatar', requireAuth, async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
   if (!user?.avatarStorageKey) return res.status(404).json({ message: 'No avatar' });
 
+  const driveFileId = parseDriveFileId(user.avatarStorageKey);
+  if (driveFileId) {
+    const googleAccount = await prisma.oAuthAccount.findFirst({
+      where: { userId: req.user!.id, provider: 'google', refreshToken: { not: null } }
+    });
+    if (!googleAccount) {
+      return res.status(404).json({ message: 'Avatar source account not connected' });
+    }
+
+    try {
+      const driveObject = await getDriveFileStream(googleAccount, driveFileId);
+      res.setHeader('Content-Type', driveObject.mimeType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'private, max-age=86400');
+      driveObject.stream.pipe(res);
+      return;
+    } catch (err) {
+      console.error('[Drive avatar error]', user.avatarStorageKey, err);
+      return res.status(404).json({ message: 'Avatar not found' });
+    }
+  }
+
   // Prefer S3 when enabled, regardless of whether the DB key is prefixed.
   // This keeps avatar rendering consistent across devices/sessions where local
   // files may no longer exist.
@@ -206,10 +242,16 @@ authRouter.post('/me/avatar', requireAuth, uploadImage.single('image'), async (r
   const localFilePath = resolveStoredFilePath(req.file.filename);
   let storageKey = req.file.filename;
 
-  if (!env.s3Enabled && env.nodeEnv === 'production') {
+  const googleAccount = !env.s3Enabled
+    ? await prisma.oAuthAccount.findFirst({
+      where: { userId: req.user!.id, provider: 'google', refreshToken: { not: null } }
+    })
+    : null;
+
+  if (!env.s3Enabled && env.nodeEnv === 'production' && !googleAccount) {
     await unlink(localFilePath).catch(() => undefined);
     return res.status(503).json({
-      message: 'Avatar storage is not configured for persistence. Please contact support to enable object storage.'
+      message: 'Avatar persistence requires either object storage or a connected Google Drive account.'
     });
   }
 
@@ -217,6 +259,21 @@ authRouter.post('/me/avatar', requireAuth, uploadImage.single('image'), async (r
     if (env.s3Enabled) {
       const s3Key = buildS3ObjectKey({ userId: req.user!.id, songId: 'avatar', fileName: req.file.originalname });
       storageKey = await uploadFileToS3({ localFilePath, objectKey: s3Key, contentType: req.file.mimetype });
+      await unlink(localFilePath).catch(() => undefined);
+    } else if (googleAccount) {
+      const rootFolderId = await ensureStudioflowRootFolder(googleAccount);
+      const uploadedDriveFileId = await uploadDriveFile(googleAccount, {
+        localFilePath,
+        name: `avatar-${req.user!.id}-${Date.now()}-${req.file.originalname}`,
+        mimeType: req.file.mimetype,
+        parentFolderId: rootFolderId
+      });
+
+      if (!uploadedDriveFileId) {
+        throw new Error('Drive avatar upload failed');
+      }
+
+      storageKey = `drive:${uploadedDriveFileId}`;
       await unlink(localFilePath).catch(() => undefined);
     }
   } catch {
@@ -227,7 +284,15 @@ authRouter.post('/me/avatar', requireAuth, uploadImage.single('image'), async (r
   // Delete old custom avatar
   if (user?.avatarStorageKey) {
     try {
-      if (isS3StorageKey(user.avatarStorageKey)) {
+      const previousDriveFileId = parseDriveFileId(user.avatarStorageKey);
+      if (previousDriveFileId) {
+        const prevGoogleAccount = await prisma.oAuthAccount.findFirst({
+          where: { userId: req.user!.id, provider: 'google', refreshToken: { not: null } }
+        });
+        if (prevGoogleAccount) {
+          await deleteDriveFile(prevGoogleAccount, previousDriveFileId);
+        }
+      } else if (isS3StorageKey(user.avatarStorageKey)) {
         await deleteS3Object(user.avatarStorageKey);
       } else {
         const prev = resolveStoredFilePath(user.avatarStorageKey);
@@ -253,7 +318,15 @@ authRouter.delete('/me/avatar', requireAuth, async (req, res) => {
   if (!user?.avatarStorageKey) return res.json({ user: mapAuthUser(user!) });
 
   try {
-    if (isS3StorageKey(user.avatarStorageKey)) {
+    const driveFileId = parseDriveFileId(user.avatarStorageKey);
+    if (driveFileId) {
+      const googleAccount = await prisma.oAuthAccount.findFirst({
+        where: { userId: req.user!.id, provider: 'google', refreshToken: { not: null } }
+      });
+      if (googleAccount) {
+        await deleteDriveFile(googleAccount, driveFileId);
+      }
+    } else if (isS3StorageKey(user.avatarStorageKey)) {
       await deleteS3Object(user.avatarStorageKey);
     } else {
       const fullPath = resolveStoredFilePath(user.avatarStorageKey);

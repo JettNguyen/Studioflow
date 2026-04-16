@@ -1,5 +1,6 @@
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
-const apiBaseUrl = configuredApiBaseUrl || (import.meta.env.PROD ? '/api' : 'http://localhost:4000/api');
+const defaultProdApiBaseUrl = 'https://studioflowapi-production.up.railway.app/api';
+const apiBaseUrl = configuredApiBaseUrl || (import.meta.env.PROD ? defaultProdApiBaseUrl : 'http://localhost:4000/api');
 // VITE_UPLOAD_BASE_URL lets large file uploads bypass Vercel's proxy (which has payload/timeout limits).
 // Set it to the direct Railway API URL in Vercel env vars, e.g. https://studioflowapi-production.up.railway.app/api
 const uploadBaseUrl = import.meta.env.VITE_UPLOAD_BASE_URL || apiBaseUrl;

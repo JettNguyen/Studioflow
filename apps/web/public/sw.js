@@ -12,7 +12,7 @@
  * Cache names are versioned. Bump CACHE_VER to force all clients to update.
  */
 
-const CACHE_VER = 'v4';
+const CACHE_VER = 'v5';
 const STATIC  = `sf-static-${CACHE_VER}`;   // immutable assets + fonts
 const DYNAMIC = `sf-dynamic-${CACHE_VER}`;  // SPA shell + misc same-origin
 const API     = `sf-api-${CACHE_VER}`;      // API responses (short-lived)
@@ -124,7 +124,8 @@ async function cacheFirst(request, cacheName) {
   const response = await fetch(request);
   if (response.ok) {
     const cache = await caches.open(cacheName);
-    cache.put(request, response.clone());
+    const copy = safeClone(response);
+    if (copy) cache.put(request, copy).catch(() => undefined);
   }
   return response;
 }
@@ -139,7 +140,8 @@ async function networkFirst(request, cacheName) {
     const response = await fetch(request);
     if (response.ok) {
       const cache = await caches.open(cacheName);
-      cache.put(request, response.clone());
+      const copy = safeClone(response);
+      if (copy) cache.put(request, copy).catch(() => undefined);
     }
     return response;
   } catch {
@@ -165,7 +167,10 @@ async function staleWhileRevalidate(request, cacheName) {
   const revalidate = fetch(request)
     .then(response => {
       if (response.ok) {
-        caches.open(cacheName).then(cache => cache.put(request, response.clone()));
+        const copy = safeClone(response);
+        if (copy) {
+          caches.open(cacheName).then(cache => cache.put(request, copy).catch(() => undefined));
+        }
       }
       return response;
     })
@@ -190,7 +195,8 @@ async function navigateWithFallback(request) {
     // Cache the shell so future navigations can fall back to it.
     if (response.ok) {
       const cache = await caches.open(DYNAMIC);
-      cache.put(request, response.clone());
+      const copy = safeClone(response);
+      if (copy) cache.put(request, copy).catch(() => undefined);
     }
     return response;
   } catch {
@@ -202,5 +208,13 @@ async function navigateWithFallback(request) {
     if (shell) return shell;
 
     return caches.match('/offline.html');
+  }
+}
+
+function safeClone(response) {
+  try {
+    return response.clone();
+  } catch {
+    return null;
   }
 }
