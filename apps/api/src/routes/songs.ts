@@ -12,7 +12,7 @@ import { prisma } from '../lib/prisma.js';
 import { env } from '../config.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { resolveStoredFilePath, upload } from '../storage/localStorage.js';
-import { buildS3ObjectKey, uploadFileToS3 } from '../storage/s3Storage.js';
+import { buildS3ObjectKey, deleteS3Object, uploadFileToS3 } from '../storage/s3Storage.js';
 import { createDriveFolder, ensureSongCategoryFolder, uploadDriveFile } from '../utils/drive.js';
 import { mapSongWorkspace } from '../utils/mappers.js';
 
@@ -687,12 +687,45 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
     });
   }
   const driveFolderId = song.driveFolderId;
-  const uploadMimeType = req.file.mimetype;
-  const uploadOriginalName = req.file.originalname;
+  if (shouldUploadToDrive && driveFolderId) {
+    for (const googleAccount of driveUploadAccounts) {
+      try {
+        const categoryFolderId = await ensureSongCategoryFolder(
+          googleAccount,
+          parsedMetadata.data.category,
+          driveFolderId
+        );
 
-  // If Drive sync is not needed and we uploaded to S3, local temp file can be removed now.
-  // When Drive sync is needed, keep the local file until background Drive upload finishes.
-  if (env.s3Enabled && !shouldUploadToDrive) {
+        driveFileId = await uploadDriveFile(googleAccount, {
+          localFilePath,
+          name: `${inputAssetName} (v${nextVersionNumber})`,
+          mimeType: req.file.mimetype,
+          parentFolderId: categoryFolderId
+        });
+
+        if (driveFileId) {
+          break;
+        }
+      } catch (driveErr) {
+        console.error('Drive upload attempt failed for asset', {
+          songId,
+          uploaderUserId: googleAccount.userId,
+          file: req.file.originalname,
+          err: driveErr
+        });
+      }
+    }
+
+    if (!driveFileId) {
+      if (env.s3Enabled && storageKey) {
+        await deleteS3Object(storageKey).catch(() => undefined);
+      }
+      await unlink(localFilePath).catch(() => undefined);
+      return res.status(502).json({ message: 'Failed to upload file to Google Drive' });
+    }
+  }
+
+  if (env.s3Enabled || driveFileId) {
     await unlink(localFilePath).catch(() => undefined);
   }
 
@@ -711,7 +744,7 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
       channels: inferredChannels,
       fileSizeBytes: inferredFileSizeBytes,
       container: inferredContainer,
-      storageKey,
+      storageKey: env.s3Enabled ? storageKey : null,
       driveFileId
     }
   });
@@ -773,64 +806,4 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
     createdAt: asset.createdAt.toISOString(),
     notes: []
   });
-
-  // Drive upload is intentionally async so large files don't keep the HTTP request
-  // open long enough to trigger 502 gateway timeouts.
-  if (shouldUploadToDrive && driveFolderId) {
-    Promise.resolve()
-      .then(async () => {
-        let uploadedDriveFileId: string | null = null;
-        for (const googleAccount of driveUploadAccounts) {
-          try {
-            const categoryFolderId = await ensureSongCategoryFolder(
-              googleAccount,
-              parsedMetadata.data.category,
-              driveFolderId
-            );
-
-            uploadedDriveFileId = await uploadDriveFile(googleAccount, {
-              localFilePath,
-              name: `${inputAssetName} (v${nextVersionNumber})`,
-              mimeType: uploadMimeType,
-              parentFolderId: categoryFolderId
-            });
-
-            if (uploadedDriveFileId) {
-              break;
-            }
-          } catch (driveErr) {
-            console.error('Drive upload attempt failed for asset', {
-              songId,
-              assetId: asset.id,
-              uploaderUserId: googleAccount.userId,
-              file: uploadOriginalName,
-              err: driveErr
-            });
-          }
-        }
-
-        if (uploadedDriveFileId) {
-          await prisma.asset.update({
-            where: { id: asset.id },
-            data: { driveFileId: uploadedDriveFileId }
-          });
-        } else if (!env.s3Enabled) {
-          // Avoid leaving a DB record that points to ephemeral local storage only.
-          await prisma.asset.delete({ where: { id: asset.id } }).catch(() => undefined);
-        }
-      })
-      .catch((driveErr) => {
-        console.error('Drive upload failed for asset', {
-          songId,
-          assetId: asset.id,
-          file: uploadOriginalName,
-          err: driveErr
-        });
-      })
-      .finally(async () => {
-        if (env.s3Enabled) {
-          await unlink(localFilePath).catch(() => undefined);
-        }
-      });
-  }
 });

@@ -261,7 +261,13 @@ authRouter.post('/me/avatar', requireAuth, uploadImage.single('image'), async (r
       storageKey = await uploadFileToS3({ localFilePath, objectKey: s3Key, contentType: req.file.mimetype });
       await unlink(localFilePath).catch(() => undefined);
     } else if (googleAccount) {
-      const rootFolderId = await ensureStudioflowRootFolder(googleAccount);
+      let rootFolderId: string | null = null;
+      try {
+        rootFolderId = await ensureStudioflowRootFolder(googleAccount);
+      } catch {
+        rootFolderId = null;
+      }
+
       const uploadedDriveFileId = await uploadDriveFile(googleAccount, {
         localFilePath,
         name: `avatar-${req.user!.id}-${Date.now()}-${req.file.originalname}`,

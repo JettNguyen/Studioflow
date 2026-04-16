@@ -11,7 +11,6 @@ import { resolveStoredFilePath, upload, uploadImage } from '../storage/localStor
 import {
   buildS3ObjectKey,
   deleteS3Object,
-  getS3Object,
   getS3ObjectWithLegacyFallback,
   getS3ObjectWithRangeLegacyFallback,
   isS3StorageKey,
@@ -19,9 +18,11 @@ import {
 } from '../storage/s3Storage.js';
 import {
   createDriveFolder,
+  deleteDriveFile,
   ensureStudioflowProjectFolder,
   ensureProjectFilesFolder,
   ensureProjectFilesCategoryFolder,
+  getDriveFileStream,
   uploadDriveFile
 } from '../utils/drive.js';
 import { mapProjectAsset, mapProjectDetails, mapProjectSummary } from '../utils/mappers.js';
@@ -97,6 +98,37 @@ function slugifyVersionGroup(value: string): string {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 120) || 'file';
+}
+
+function isDriveStorageKey(value: string | null | undefined): value is string {
+  return typeof value === 'string' && value.startsWith('drive:');
+}
+
+function parseDriveFileId(storageKey: string | null | undefined): string | null {
+  if (!isDriveStorageKey(storageKey)) return null;
+  const id = storageKey.slice('drive:'.length).trim();
+  return id || null;
+}
+
+async function findDriveAccountsForProject(userId: string, projectId: string, ownerId: string) {
+  const memberships = await prisma.projectMembership.findMany({
+    where: { projectId },
+    select: { userId: true }
+  });
+
+  const orderedIds = Array.from(new Set([userId, ownerId, ...memberships.map((m) => m.userId)]));
+  const accounts = await prisma.oAuthAccount.findMany({
+    where: {
+      provider: 'google',
+      userId: { in: orderedIds },
+      refreshToken: { not: null }
+    }
+  });
+
+  const byUserId = new Map(accounts.map((a) => [a.userId, a]));
+  return orderedIds
+    .map((id) => byUserId.get(id))
+    .filter((account): account is (typeof accounts)[number] => Boolean(account));
 }
 
 export const projectRouter = Router();
@@ -432,6 +464,24 @@ projectRouter.get('/:projectId/cover', async (req, res) => {
   const project = await prisma.project.findUnique({ where: { id: paramToString(req.params.projectId) } });
   if (!project?.coverImageKey) return res.status(404).json({ message: 'No cover image' });
 
+  const driveFileId = parseDriveFileId(project.coverImageKey);
+  if (driveFileId) {
+    const accounts = await findDriveAccountsForProject(req.user!.id, project.id, project.createdById);
+    for (const account of accounts) {
+      try {
+        const driveObject = await getDriveFileStream(account, driveFileId);
+        res.setHeader('Content-Type', driveObject.mimeType || 'image/jpeg');
+        res.setHeader('Cache-Control', 'private, max-age=86400');
+        driveObject.stream.pipe(res);
+        return;
+      } catch (err) {
+        console.error('[Drive cover error]', project.coverImageKey, account.userId, err);
+      }
+    }
+
+    return res.status(404).json({ message: 'Cover image not found' });
+  }
+
   // Prefer S3 when enabled, even for legacy/plain keys, to keep covers
   // available across devices/sessions where local files may be absent.
   if (env.s3Enabled) {
@@ -472,25 +522,88 @@ projectRouter.post('/:projectId/cover', uploadImage.single('image'), async (req,
   if (!req.file) return res.status(400).json({ message: 'No image file provided' });
 
   const project = await prisma.project.findUnique({ where: { id: paramToString(req.params.projectId) } });
+  if (!project) return res.status(404).json({ message: 'Project not found' });
 
   const localFilePath = resolveStoredFilePath(req.file.filename);
   let storageKey = req.file.filename;
+  let driveFileId: string | null = null;
+
+  const driveAccounts = await findDriveAccountsForProject(req.user!.id, project.id, project.createdById);
+  let projectDriveFolderId = project.driveFolderId;
+
+  if (!env.s3Enabled && env.nodeEnv === 'production' && !driveAccounts.length) {
+    await unlink(localFilePath).catch(() => undefined);
+    return res.status(503).json({
+      message: 'Cover image persistence requires either object storage or a connected Google Drive account.'
+    });
+  }
+
+  if (!projectDriveFolderId && driveAccounts.length) {
+    for (const account of driveAccounts) {
+      try {
+        projectDriveFolderId = await ensureStudioflowProjectFolder(account, project.title);
+        if (projectDriveFolderId) {
+          await prisma.project.update({
+            where: { id: project.id },
+            data: { driveFolderId: projectDriveFolderId, driveSyncStatus: 'Healthy' }
+          });
+          break;
+        }
+      } catch {
+        // Try next account.
+      }
+    }
+  }
 
   try {
     if (env.s3Enabled) {
       const s3Key = buildS3ObjectKey({ userId: req.user!.id, songId: paramToString(req.params.projectId), fileName: req.file.originalname });
       storageKey = await uploadFileToS3({ localFilePath, objectKey: s3Key, contentType: req.file.mimetype });
-      await unlink(localFilePath).catch(() => undefined);
+    }
+
+    if (projectDriveFolderId && driveAccounts.length) {
+      for (const account of driveAccounts) {
+        try {
+          driveFileId = await uploadDriveFile(account, {
+            localFilePath,
+            name: `cover-${project.id}-${Date.now()}-${req.file.originalname}`,
+            mimeType: req.file.mimetype,
+            parentFolderId: projectDriveFolderId
+          });
+          if (driveFileId) break;
+        } catch {
+          // Try next account.
+        }
+      }
+
+      if (!driveFileId && !env.s3Enabled) {
+        throw new Error('Drive cover upload failed');
+      }
     }
   } catch {
+    if (env.s3Enabled && isS3StorageKey(storageKey)) {
+      await deleteS3Object(storageKey).catch(() => undefined);
+    }
     await unlink(localFilePath).catch(() => undefined);
     return res.status(500).json({ message: 'Failed to store cover image' });
   }
 
+  await unlink(localFilePath).catch(() => undefined);
+
   // Delete previous cover if it exists
   if (project?.coverImageKey) {
     try {
-      if (isS3StorageKey(project.coverImageKey)) {
+      const previousDriveFileId = parseDriveFileId(project.coverImageKey);
+      if (previousDriveFileId) {
+        for (const account of driveAccounts) {
+          try {
+            await deleteDriveFile(account, previousDriveFileId);
+            break;
+          } catch {
+            // Try next account.
+          }
+        }
+      } else if (isS3StorageKey(project.coverImageKey)) {
         await deleteS3Object(project.coverImageKey);
       } else {
         const prev = resolveStoredFilePath(project.coverImageKey);
@@ -501,7 +614,7 @@ projectRouter.post('/:projectId/cover', uploadImage.single('image'), async (req,
 
   const updated = await prisma.project.update({
     where: { id: paramToString(req.params.projectId) },
-    data: { coverImageKey: storageKey },
+    data: { coverImageKey: env.s3Enabled ? storageKey : (driveFileId ? `drive:${driveFileId}` : storageKey) },
     include: {
       songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
       _count: { select: { projectAssets: true } }
@@ -520,8 +633,20 @@ projectRouter.delete('/:projectId/cover', async (req, res) => {
   const project = await prisma.project.findUnique({ where: { id: paramToString(req.params.projectId) } });
   if (!project?.coverImageKey) return res.status(204).send();
 
+  const driveAccounts = await findDriveAccountsForProject(req.user!.id, project.id, project.createdById);
+
   try {
-    if (isS3StorageKey(project.coverImageKey)) {
+    const driveFileId = parseDriveFileId(project.coverImageKey);
+    if (driveFileId) {
+      for (const account of driveAccounts) {
+        try {
+          await deleteDriveFile(account, driveFileId);
+          break;
+        } catch {
+          // Try next account.
+        }
+      }
+    } else if (isS3StorageKey(project.coverImageKey)) {
       await deleteS3Object(project.coverImageKey);
     } else {
       const fullPath = resolveStoredFilePath(project.coverImageKey);
@@ -554,7 +679,7 @@ projectRouter.get('/:projectId/assets', async (req, res) => {
   if (!membership) return res.status(404).json({ message: 'Project not found' });
 
   const assets = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE "projectId" = ${paramToString(req.params.projectId)}
     ORDER BY "createdAt" DESC
@@ -635,32 +760,66 @@ projectRouter.post('/:projectId/assets', upload.single('file'), async (req, res)
 
   const localFilePath = resolveStoredFilePath(req.file.filename);
   let storageKey: string | null = req.file.filename;
+  let driveFileId: string | null = null;
   const fileSizeBytes = req.file.size ?? null;
 
   const uploadProject = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { driveFolderId: true }
+    select: { driveFolderId: true, createdById: true, title: true }
   });
 
-  if (uploadProject?.driveFolderId) {
-    const googleAccount = await prisma.oAuthAccount.findFirst({
-      where: { userId: req.user!.id, provider: 'google' }
-    });
-    if (googleAccount) {
+  const driveAccounts = uploadProject
+    ? await findDriveAccountsForProject(req.user!.id, projectId, uploadProject.createdById)
+    : [];
+
+  let projectDriveFolderId = uploadProject?.driveFolderId ?? null;
+  if (!projectDriveFolderId && uploadProject && driveAccounts.length) {
+    for (const account of driveAccounts) {
       try {
-        const projectFilesFolderId = await ensureProjectFilesFolder(googleAccount, uploadProject.driveFolderId);
-        if (projectFilesFolderId) {
-          const targetFolderId = await ensureProjectFilesCategoryFolder(googleAccount, category, projectFilesFolderId);
-          await uploadDriveFile(googleAccount, {
-            localFilePath,
-            name: assetName,
-            mimeType: req.file.mimetype,
-            parentFolderId: targetFolderId
+        projectDriveFolderId = await ensureStudioflowProjectFolder(account, uploadProject.title);
+        if (projectDriveFolderId) {
+          await prisma.project.update({
+            where: { id: projectId },
+            data: { driveFolderId: projectDriveFolderId, driveSyncStatus: 'Healthy' }
           });
+          break;
         }
       } catch {
-        // Drive upload is best-effort
+        // Try next account.
       }
+    }
+  }
+
+  if (!env.s3Enabled && !driveAccounts.length) {
+    await unlink(localFilePath).catch(() => undefined);
+    return res.status(503).json({
+      message: 'No durable upload backend is currently available. Connect Google Drive or enable S3 storage and retry.'
+    });
+  }
+
+  if (projectDriveFolderId && driveAccounts.length) {
+    for (const account of driveAccounts) {
+      try {
+        const projectFilesFolderId = await ensureProjectFilesFolder(account, projectDriveFolderId);
+        if (!projectFilesFolderId) {
+          continue;
+        }
+        const targetFolderId = await ensureProjectFilesCategoryFolder(account, category, projectFilesFolderId);
+        driveFileId = await uploadDriveFile(account, {
+          localFilePath,
+          name: assetName,
+          mimeType: req.file.mimetype,
+          parentFolderId: targetFolderId
+        });
+        if (driveFileId) break;
+      } catch {
+        // Try next account.
+      }
+    }
+
+    if (!driveFileId) {
+      await unlink(localFilePath).catch(() => undefined);
+      return res.status(502).json({ message: 'Failed to upload file to Google Drive' });
     }
   }
 
@@ -668,23 +827,26 @@ projectRouter.post('/:projectId/assets', upload.single('file'), async (req, res)
     if (env.s3Enabled) {
       const s3Key = buildS3ObjectKey({ userId: req.user!.id, songId: projectId, fileName: req.file.originalname });
       storageKey = await uploadFileToS3({ localFilePath, objectKey: s3Key, contentType: req.file.mimetype });
-      await unlink(localFilePath).catch(() => undefined);
     }
   } catch {
     await unlink(localFilePath).catch(() => undefined);
     return res.status(500).json({ message: 'Failed to store file' });
   }
 
+  if (env.s3Enabled || driveFileId) {
+    await unlink(localFilePath).catch(() => undefined);
+  }
+
   const id = crypto.randomUUID();
   const now = new Date();
 
   await prisma.$executeRaw`
-    INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt")
-    VALUES (${id}, ${projectId}, ${assetName}, ${req.file.mimetype}, ${category}, ${versionGroup}, ${versionNumber}, ${fileSizeBytes}, ${storageKey}, ${now}, ${now})
+    INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt")
+    VALUES (${id}, ${projectId}, ${assetName}, ${req.file.mimetype}, ${category}, ${versionGroup}, ${versionNumber}, ${fileSizeBytes}, ${env.s3Enabled ? storageKey : null}, ${driveFileId}, ${now}, ${now})
   `;
 
   const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt"
     FROM "ProjectAsset" WHERE id = ${id}
   `;
 
@@ -699,7 +861,7 @@ projectRouter.get('/:projectId/assets/:assetId/download', async (req, res) => {
   if (!membership) return res.status(404).json({ message: 'Project not found' });
 
   const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE id = ${paramToString(req.params.assetId)}
       AND "projectId" = ${paramToString(req.params.projectId)}
@@ -731,6 +893,33 @@ projectRouter.get('/:projectId/assets/:assetId/download', async (req, res) => {
     }
   }
 
+  if (asset.driveFileId) {
+    const project = await prisma.project.findUnique({
+      where: { id: paramToString(req.params.projectId) },
+      select: { createdById: true }
+    });
+
+    if (project) {
+      const accounts = await findDriveAccountsForProject(req.user!.id, paramToString(req.params.projectId), project.createdById);
+      for (const account of accounts) {
+        try {
+          const driveObject = await getDriveFileStream(account, asset.driveFileId);
+          res.setHeader('Content-Type', driveObject.mimeType || asset.type || 'application/octet-stream');
+          if (typeof driveObject.contentLength === 'number') {
+            res.setHeader('Content-Length', driveObject.contentLength.toString());
+          } else if (typeof driveObject.size === 'number') {
+            res.setHeader('Content-Length', driveObject.size.toString());
+          }
+          driveObject.stream.pipe(res);
+          return;
+        } catch {
+          // Try next account.
+        }
+      }
+    }
+  }
+
+  if (!asset.storageKey) return res.status(404).json({ message: 'File not found' });
   const fullPath = resolveStoredFilePath(asset.storageKey);
   if (!existsSync(fullPath)) return res.status(404).json({ message: 'File not found' });
 
@@ -750,7 +939,7 @@ projectRouter.delete('/:projectId/assets/:assetId', async (req, res) => {
   if (!membership) return res.status(404).json({ message: 'Project not found' });
 
   const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE id = ${paramToString(req.params.assetId)}
       AND "projectId" = ${paramToString(req.params.projectId)}
@@ -758,13 +947,33 @@ projectRouter.delete('/:projectId/assets/:assetId', async (req, res) => {
 
   if (!asset) return res.status(404).json({ message: 'Asset not found' });
 
-  if (asset.storageKey && !asset.storageKey.startsWith('link:')) {
+  if (asset.driveFileId || (asset.storageKey && !asset.storageKey.startsWith('link:'))) {
     try {
-      if (isS3StorageKey(asset.storageKey)) {
-        await deleteS3Object(asset.storageKey);
-      } else {
-        const fullPath = resolveStoredFilePath(asset.storageKey);
-        if (existsSync(fullPath)) await unlink(fullPath).catch(() => undefined);
+      if (asset.driveFileId) {
+        const project = await prisma.project.findUnique({
+          where: { id: paramToString(req.params.projectId) },
+          select: { createdById: true }
+        });
+        if (project) {
+          const accounts = await findDriveAccountsForProject(req.user!.id, paramToString(req.params.projectId), project.createdById);
+          for (const account of accounts) {
+            try {
+              await deleteDriveFile(account, asset.driveFileId);
+              break;
+            } catch {
+              // Try next account.
+            }
+          }
+        }
+      }
+
+      if (asset.storageKey) {
+        if (isS3StorageKey(asset.storageKey)) {
+          await deleteS3Object(asset.storageKey);
+        } else {
+          const fullPath = resolveStoredFilePath(asset.storageKey);
+          if (existsSync(fullPath)) await unlink(fullPath).catch(() => undefined);
+        }
       }
     } catch { /* non-fatal */ }
   }
@@ -786,7 +995,7 @@ projectRouter.patch('/:projectId/assets/:assetId', async (req, res) => {
   }
 
   const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE id = ${paramToString(req.params.assetId)}
       AND "projectId" = ${paramToString(req.params.projectId)}
@@ -830,7 +1039,7 @@ projectRouter.patch('/:projectId/assets/:assetId', async (req, res) => {
   );
 
   const [updated] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt"
     FROM "ProjectAsset"
     WHERE id = ${paramToString(req.params.assetId)}
       AND "projectId" = ${paramToString(req.params.projectId)}
