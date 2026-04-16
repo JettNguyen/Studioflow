@@ -429,10 +429,95 @@
   border-color: var(--border-strong);
 }
 
+.asset-notes-toggle {
+  position: relative;
+}
+
 .asset-notes-toggle.active {
   color: var(--text);
   border-color: var(--border-strong);
   background: var(--surface-hover);
+}
+
+.asset-notes-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  background: var(--accent, #7c6aff);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  line-height: 1;
+}
+
+/* ── Asset overflow (3-dots) menu ── */
+.asset-overflow {
+  position: relative;
+}
+
+.asset-overflow__trigger {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.asset-overflow__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 100;
+  min-width: 130px;
+  background: var(--surface-raised, #1e1e1e);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-2);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.asset-overflow__item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border-radius: var(--r-1);
+  font-size: 13px;
+  color: var(--text-2);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.15s, color 0.15s;
+  white-space: nowrap;
+  width: 100%;
+  text-align: left;
+}
+
+.asset-overflow__item:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.asset-overflow__item--danger {
+  color: var(--red, #e05252);
+}
+
+.asset-overflow__item--danger:hover {
+  background: rgba(224, 82, 82, 0.1);
+  color: var(--red, #e05252);
 }
 
 /* ── Asset notes area (collapsible) ── */
@@ -475,8 +560,8 @@
 
 .smc-row {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 0;
   padding: 10px;
   border-radius: var(--r-2);
   border: 1px solid transparent;
@@ -486,6 +571,16 @@
 .smc-row:hover {
   background: var(--surface-raised);
   border-color: var(--border);
+}
+
+.smc-row__main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.smc-row .asset-notes-area {
+  margin-top: 10px;
 }
 
 .smc-row__icon {

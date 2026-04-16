@@ -17,7 +17,13 @@ import {
   isS3StorageKey,
   uploadFileToS3
 } from '../storage/s3Storage.js';
-import { createDriveFolder, ensureStudioflowProjectFolder } from '../utils/drive.js';
+import {
+  createDriveFolder,
+  ensureStudioflowProjectFolder,
+  ensureProjectFilesFolder,
+  ensureProjectFilesCategoryFolder,
+  uploadDriveFile
+} from '../utils/drive.js';
 import { mapProjectAsset, mapProjectDetails, mapProjectSummary } from '../utils/mappers.js';
 
 type RawProjectAsset = {
@@ -30,9 +36,57 @@ type RawProjectAsset = {
   versionNumber: number;
   fileSizeBytes: number | null;
   storageKey: string | null;
+  driveFileId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
+
+type RawProjectAssetNote = {
+  id: string;
+  assetId: string;
+  body: string;
+  createdAt: Date;
+  authorName: string;
+};
+
+function isMissingDbObjectError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const maybe = error as { code?: string; meta?: { code?: string } };
+  return maybe.code === 'P2010' && (maybe.meta?.code === '42703' || maybe.meta?.code === '42P01');
+}
+
+async function loadProjectAssetNotes(assetIds: string[]) {
+  if (!assetIds.length) return new Map<string, Array<{ id: string; body: string; createdAt: Date; author: { name: string } }>>();
+
+  let notes: RawProjectAssetNote[] = [];
+  try {
+    notes = await prisma.$queryRaw<RawProjectAssetNote[]>`
+      SELECT n.id, n."assetId", n.body, n."createdAt", u.name as "authorName"
+      FROM "ProjectAssetNote" n
+      INNER JOIN "User" u ON u.id = n."authorId"
+      WHERE n."assetId" = ANY(${assetIds})
+      ORDER BY n."createdAt" ASC
+    `;
+  } catch (error) {
+    if (isMissingDbObjectError(error)) {
+      return new Map();
+    }
+    throw error;
+  }
+
+  const byAssetId = new Map<string, Array<{ id: string; body: string; createdAt: Date; author: { name: string } }>>();
+  for (const note of notes) {
+    const current = byAssetId.get(note.assetId) ?? [];
+    current.push({
+      id: note.id,
+      body: note.body,
+      createdAt: note.createdAt,
+      author: { name: note.authorName }
+    });
+    byAssetId.set(note.assetId, current);
+  }
+  return byAssetId;
+}
 
 function slugifyVersionGroup(value: string): string {
   return value
@@ -509,7 +563,8 @@ projectRouter.get('/:projectId/assets', async (req, res) => {
     ORDER BY "createdAt" DESC
   `;
 
-  res.json(assets.map(mapProjectAsset));
+  const notesByAssetId = await loadProjectAssetNotes(assets.map(a => a.id));
+  res.json(assets.map(a => mapProjectAsset({ ...a, notes: notesByAssetId.get(a.id) ?? [] })));
 });
 
 // Create a link-type project asset (no file — stores a URL, e.g. a Google Docs shot list)
@@ -525,7 +580,6 @@ projectRouter.post('/:projectId/assets/link', async (req, res) => {
   const linkUrl = typeof req.body.linkUrl === 'string' ? req.body.linkUrl.trim() : '';
   if (!linkUrl) return res.status(400).json({ message: 'linkUrl is required' });
 
-  // Basic URL validation
   try { new URL(linkUrl); } catch {
     return res.status(400).json({ message: 'linkUrl must be a valid URL' });
   }
@@ -548,19 +602,7 @@ projectRouter.post('/:projectId/assets/link', async (req, res) => {
 
   await prisma.$executeRaw`
     INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt")
-    VALUES (
-      ${id},
-      ${projectId},
-      ${assetName},
-      ${'text/uri-list'},
-      ${category},
-      ${versionGroup},
-      ${versionNumber},
-      ${null},
-      ${storageKey},
-      ${now},
-      ${now}
-    )
+    VALUES (${id}, ${projectId}, ${assetName}, ${'text/uri-list'}, ${category}, ${versionGroup}, ${versionNumber}, ${null}, ${storageKey}, ${now}, ${now})
   `;
 
   const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
@@ -568,7 +610,7 @@ projectRouter.post('/:projectId/assets/link', async (req, res) => {
     FROM "ProjectAsset" WHERE id = ${id}
   `;
 
-  res.status(201).json(mapProjectAsset(created));
+  res.status(201).json(mapProjectAsset({ ...created, notes: [] }));
 });
 
 // Upload a project misc asset
@@ -598,6 +640,33 @@ projectRouter.post('/:projectId/assets', upload.single('file'), async (req, res)
   let storageKey: string | null = req.file.filename;
   const fileSizeBytes = req.file.size ?? null;
 
+  const uploadProject = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { driveFolderId: true }
+  });
+
+  if (uploadProject?.driveFolderId) {
+    const googleAccount = await prisma.oAuthAccount.findFirst({
+      where: { userId: req.user!.id, provider: 'google' }
+    });
+    if (googleAccount) {
+      try {
+        const projectFilesFolderId = await ensureProjectFilesFolder(googleAccount, uploadProject.driveFolderId);
+        if (projectFilesFolderId) {
+          const targetFolderId = await ensureProjectFilesCategoryFolder(googleAccount, category, projectFilesFolderId);
+          await uploadDriveFile(googleAccount, {
+            localFilePath,
+            name: assetName,
+            mimeType: req.file.mimetype,
+            parentFolderId: targetFolderId
+          });
+        }
+      } catch {
+        // Drive upload is best-effort
+      }
+    }
+  }
+
   try {
     if (env.s3Enabled) {
       const s3Key = buildS3ObjectKey({ userId: req.user!.id, songId: projectId, fileName: req.file.originalname });
@@ -614,19 +683,7 @@ projectRouter.post('/:projectId/assets', upload.single('file'), async (req, res)
 
   await prisma.$executeRaw`
     INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt")
-    VALUES (
-      ${id},
-      ${projectId},
-      ${assetName},
-      ${req.file.mimetype},
-      ${category},
-      ${versionGroup},
-      ${versionNumber},
-      ${fileSizeBytes},
-      ${storageKey},
-      ${now},
-      ${now}
-    )
+    VALUES (${id}, ${projectId}, ${assetName}, ${req.file.mimetype}, ${category}, ${versionGroup}, ${versionNumber}, ${fileSizeBytes}, ${storageKey}, ${now}, ${now})
   `;
 
   const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
@@ -634,7 +691,7 @@ projectRouter.post('/:projectId/assets', upload.single('file'), async (req, res)
     FROM "ProjectAsset" WHERE id = ${id}
   `;
 
-  res.status(201).json(mapProjectAsset(created));
+  res.status(201).json(mapProjectAsset({ ...created, notes: [] }));
 });
 
 // Download a project misc asset
@@ -653,7 +710,6 @@ projectRouter.get('/:projectId/assets/:assetId/download', async (req, res) => {
 
   if (!asset || !asset.storageKey) return res.status(404).json({ message: 'Asset not found' });
 
-  // Link-type asset — redirect to the stored URL
   if (asset.storageKey.startsWith('link:')) {
     return res.redirect(asset.storageKey.slice(5));
   }
@@ -705,8 +761,7 @@ projectRouter.delete('/:projectId/assets/:assetId', async (req, res) => {
 
   if (!asset) return res.status(404).json({ message: 'Asset not found' });
 
-  // Delete stored file
-  if (asset.storageKey) {
+  if (asset.storageKey && !asset.storageKey.startsWith('link:')) {
     try {
       if (isS3StorageKey(asset.storageKey)) {
         await deleteS3Object(asset.storageKey);
@@ -718,7 +773,6 @@ projectRouter.delete('/:projectId/assets/:assetId', async (req, res) => {
   }
 
   await prisma.$executeRaw`DELETE FROM "ProjectAsset" WHERE id = ${asset.id}`;
-
   res.status(204).send();
 });
 
@@ -787,5 +841,59 @@ projectRouter.patch('/:projectId/assets/:assetId', async (req, res) => {
 
   if (!updated) return res.status(404).json({ message: 'Asset not found after update' });
 
-  res.json(mapProjectAsset(updated));
+  const notesByAssetId = await loadProjectAssetNotes([updated.id]);
+  res.json(mapProjectAsset({ ...updated, notes: notesByAssetId.get(updated.id) ?? [] }));
+});
+
+// ── Project Asset Notes ───────────────────────────────────────────────────────
+
+projectRouter.post('/:projectId/assets/:assetId/notes', async (req, res) => {
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  const body = typeof req.body.body === 'string' ? req.body.body.trim() : '';
+  if (!body) return res.status(400).json({ message: 'Note body is required' });
+
+  const [asset] = await prisma.$queryRaw<RawProjectAsset[]>`
+    SELECT id, "projectId"
+    FROM "ProjectAsset"
+    WHERE id = ${paramToString(req.params.assetId)}
+      AND "projectId" = ${paramToString(req.params.projectId)}
+  `;
+  if (!asset) return res.status(404).json({ message: 'Asset not found' });
+
+  const noteId = crypto.randomUUID();
+  const now = new Date();
+  await prisma.$executeRaw`
+    INSERT INTO "ProjectAssetNote" (id, "assetId", "authorId", body, "createdAt", "updatedAt")
+    VALUES (${noteId}, ${asset.id}, ${req.user!.id}, ${body}, ${now}, ${now})
+  `;
+
+  res.status(201).json({ id: noteId, author: req.user!.name, body, createdAt: now.toISOString() });
+});
+
+projectRouter.delete('/:projectId/assets/:assetId/notes/:noteId', async (req, res) => {
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  const [note] = await prisma.$queryRaw<Array<{ id: string; authorId: string }>>`
+    SELECT n.id, n."authorId"
+    FROM "ProjectAssetNote" n
+    INNER JOIN "ProjectAsset" a ON a.id = n."assetId"
+    WHERE n.id = ${paramToString(req.params.noteId)}
+      AND n."assetId" = ${paramToString(req.params.assetId)}
+      AND a."projectId" = ${paramToString(req.params.projectId)}
+  `;
+  if (!note) return res.status(404).json({ message: 'Note not found' });
+
+  if (note.authorId !== req.user!.id && membership.role === 'Viewer') {
+    return res.status(403).json({ message: 'Not authorized to delete this note' });
+  }
+
+  await prisma.$executeRaw`DELETE FROM "ProjectAssetNote" WHERE id = ${note.id}`;
+  res.status(204).send();
 });

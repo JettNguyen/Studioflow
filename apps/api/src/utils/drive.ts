@@ -119,6 +119,33 @@ export async function ensureSongCategoryFolder(
   return subFolderId ?? songDriveFolderId;
 }
 
+/**
+ * Finds or creates the "PROJECT FILES" folder inside the given project Drive
+ * folder. Returns the folder ID, or null if creation fails.
+ */
+export async function ensureProjectFilesFolder(
+  account: OAuthAccount,
+  projectDriveFolderId: string
+): Promise<string | null> {
+  return findOrCreateDriveFolder(account, 'PROJECT FILES', projectDriveFolderId);
+}
+
+/**
+ * Finds or creates a category subfolder inside the PROJECT FILES folder.
+ * If category is "Other" or empty, returns the projectFilesFolderId directly
+ * (files go straight into PROJECT FILES without a nested subfolder).
+ */
+export async function ensureProjectFilesCategoryFolder(
+  account: OAuthAccount,
+  category: string,
+  projectFilesFolderId: string
+): Promise<string> {
+  const cat = (category || 'Other').trim();
+  if (cat === 'Other') return projectFilesFolderId;
+  const subId = await findOrCreateDriveFolder(account, cat, projectFilesFolderId);
+  return subId ?? projectFilesFolderId;
+}
+
 export async function createDriveFolder(account: OAuthAccount, folderName: string, parentFolderId?: string | null) {
   const oauthClient = getAuthorizedClient(account);
 

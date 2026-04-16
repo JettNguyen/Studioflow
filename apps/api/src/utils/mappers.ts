@@ -3,6 +3,7 @@ import type {
   AssetCategory,
   AuthUser,
   ProjectAsset,
+  ProjectAssetNote,
   ProjectAssetCategory,
   ProjectDetails,
   ProjectSummary,
@@ -76,12 +77,30 @@ export function mapProjectAssetCategory(category: string): ProjectAssetCategory 
 }
 
 export function mapProjectAsset(
-  asset: { id: string; projectId: string; name: string; type: string; category: string; versionGroup: string; versionNumber: number; fileSizeBytes: number | null; storageKey: string | null; createdAt: Date }
+  asset: {
+    id: string;
+    projectId: string;
+    name: string;
+    type: string;
+    category: string;
+    versionGroup: string;
+    versionNumber: number;
+    fileSizeBytes: number | null;
+    storageKey: string | null;
+    createdAt: Date;
+    notes?: Array<{ id: string; body: string; createdAt: Date; author: { name: string } }>;
+  }
 ): ProjectAsset {
   const isLink = Boolean(asset.storageKey?.startsWith('link:'));
   const downloadUrl = isLink
     ? asset.storageKey!.slice(5)
     : `/api/projects/${asset.projectId}/assets/${asset.id}/download`;
+  const notes: ProjectAssetNote[] = (asset.notes ?? []).map(n => ({
+    id: n.id,
+    author: n.author.name,
+    body: n.body,
+    createdAt: n.createdAt.toISOString()
+  }));
   return {
     id: asset.id,
     name: asset.name,
@@ -92,7 +111,8 @@ export function mapProjectAsset(
     fileSizeBytes: asset.fileSizeBytes,
     isLink,
     downloadUrl,
-    createdAt: asset.createdAt.toISOString()
+    createdAt: asset.createdAt.toISOString(),
+    notes
   };
 }
 

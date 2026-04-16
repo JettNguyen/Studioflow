@@ -63,12 +63,14 @@ async function readFileDuration(file: File): Promise<string | null> {
     const el = document.createElement(kind);
     el.preload = 'metadata';
     return await new Promise<string | null>((resolve) => {
+      const timeout = setTimeout(() => { URL.revokeObjectURL(url); resolve(null); }, 8000);
       el.onloadedmetadata = () => {
+        clearTimeout(timeout);
         URL.revokeObjectURL(url);
         const s = Math.round(el.duration);
         resolve(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
       };
-      el.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+      el.onerror = () => { clearTimeout(timeout); URL.revokeObjectURL(url); resolve(null); };
       el.src = url;
     });
   } catch {
@@ -140,6 +142,17 @@ export function SongWorkspacePage() {
     () => activeVideoAsset?.streamUrl ? resolveApiUrl(activeVideoAsset.streamUrl) : null,
     [activeVideoAsset]
   );
+
+  // Open overflow (3-dots) menu id
+  const [openOverflowId, setOpenOverflowId] = useState<string | null>(null);
+
+  // Close overflow menu when clicking outside
+  useEffect(() => {
+    if (!openOverflowId) return;
+    const handler = () => setOpenOverflowId(null);
+    document.addEventListener('click', handler, { capture: true });
+    return () => document.removeEventListener('click', handler, { capture: true });
+  }, [openOverflowId]);
 
   // ── Global drag-and-drop (desktop only) ──────────────────────────────────
   const { registerHandler } = useDropZone();
@@ -405,6 +418,14 @@ export function SongWorkspacePage() {
     } catch (err) { setError(err instanceof Error ? err.message : 'Failed to add note'); }
   };
 
+  const deleteAssetNote = async (assetId: string, noteId: string) => {
+    if (!song) return;
+    try {
+      await apiRequest(`/assets/${assetId}/notes/${noteId}`, { method: 'DELETE' });
+      setSong({ ...song, assets: song.assets.map(a => a.id === assetId ? { ...a, notes: a.notes.filter(n => n.id !== noteId) } : a) });
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to delete note'); }
+  };
+
   const saveShotList = async () => {
     if (!songId) return;
     const url = shotListInput.trim() || null;
@@ -574,17 +595,6 @@ export function SongWorkspacePage() {
 
         {/* Actions */}
         <div className="asset-actions">
-          <button
-            className="btn btn-ghost btn-icon"
-            type="button"
-            onClick={() => startEditAsset(asset)}
-            aria-label="Edit asset"
-            title="Edit asset"
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path d="M8.5 1.5l2 2L4 10H2V8L8.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-            </svg>
-          </button>
           {asset.mediaKind === 'video' && asset.streamUrl && (
             <button
               className="btn btn-ghost btn-icon"
@@ -598,31 +608,6 @@ export function SongWorkspacePage() {
               </svg>
             </button>
           )}
-          {asset.downloadUrl && (
-            <a
-              className="asset-download-link btn-icon"
-              href={resolveApiUrl(asset.downloadUrl)}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Download"
-              title="Download"
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </a>
-          )}
-          <button
-            className="btn btn-danger btn-icon"
-            type="button"
-            onClick={() => removeAsset(asset)}
-            aria-label="Remove asset"
-            title="Remove asset"
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path d="M2.5 3h7M4.5 3V2h3v1M5 5v4M7 5v4M3.5 3l.4 6.2a1 1 0 001 .8h1.2a1 1 0 001-.8L8 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
           <button
             className={`btn btn-ghost btn-icon asset-notes-toggle${notesOpen ? ' active' : ''}`}
             type="button"
@@ -630,10 +615,68 @@ export function SongWorkspacePage() {
             aria-label={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
             title={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
           >
+            {asset.notes.length > 0 && <span className="asset-notes-badge">{asset.notes.length}</span>}
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
               <path d="M2 2.5h8v5.5H5l-2.5 2v-2H2v-5.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
             </svg>
           </button>
+          {/* Overflow (3-dots) menu */}
+          <div className="asset-overflow">
+            <button
+              className="btn btn-ghost btn-icon asset-overflow__trigger"
+              type="button"
+              onClick={() => setOpenOverflowId(openOverflowId === asset.id ? null : asset.id)}
+              aria-label="More options"
+              title="More options"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <circle cx="2" cy="6" r="1" fill="currentColor"/>
+                <circle cx="6" cy="6" r="1" fill="currentColor"/>
+                <circle cx="10" cy="6" r="1" fill="currentColor"/>
+              </svg>
+            </button>
+            {openOverflowId === asset.id && (
+              <div className="asset-overflow__menu" role="menu">
+                <button
+                  className="asset-overflow__item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { startEditAsset(asset); setOpenOverflowId(null); }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                    <path d="M8.5 1.5l2 2L4 10H2V8L8.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                  </svg>
+                  Edit
+                </button>
+                {asset.downloadUrl && (
+                  <a
+                    className="asset-overflow__item"
+                    href={resolveApiUrl(asset.downloadUrl)}
+                    target="_blank"
+                    rel="noreferrer"
+                    role="menuitem"
+                    onClick={() => setOpenOverflowId(null)}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                      <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Download
+                  </a>
+                )}
+                <button
+                  className="asset-overflow__item asset-overflow__item--danger"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { removeAsset(asset); setOpenOverflowId(null); }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                    <path d="M2.5 3h7M4.5 3V2h3v1M5 5v4M7 5v4M3.5 3l.4 6.2a1 1 0 001 .8h1.2a1 1 0 001-.8L8 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {editingAssetId === asset.id && (
@@ -714,6 +757,17 @@ export function SongWorkspacePage() {
                       <time className="note-item__time" dateTime={note.createdAt} title={fmtAbsolute(note.createdAt)}>
                         {timeAgo(note.createdAt)}
                       </time>
+                      <button
+                        className="btn btn-ghost btn-icon note-item__delete"
+                        type="button"
+                        onClick={() => deleteAssetNote(asset.id, note.id)}
+                        aria-label="Delete note"
+                        title="Delete note"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                          <path d="M2 3h8M5 3V2h2v1M3 3l.5 7h5L9 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
                     </div>
                     <p className="note-item__body">{note.body}</p>
                   </li>
@@ -1004,88 +1058,125 @@ export function SongWorkspacePage() {
                   {!isCollapsed && <div className="smc-list">
                     {smcAssets.map(asset => {
                       const isImg = asset.mediaKind === 'other' && asset.type.startsWith('image/');
+                      const notesOpen = openAssetNotes.has(asset.id);
                       return (
                         <div key={asset.id} className="smc-row">
-                          {/* Thumbnail / icon */}
-                          {asset.mediaKind === 'video' && asset.streamUrl ? (
-                            <div className="smc-row__thumb">
-                              <VideoThumbnail
-                                src={resolveApiUrl(asset.streamUrl)}
-                                onClick={() => setActiveVideoAsset(asset)}
-                                aspect={16 / 9}
-                              />
-                            </div>
-                          ) : isImg && asset.streamUrl ? (
-                            <div className="smc-row__thumb smc-row__thumb--img">
-                              <img src={resolveApiUrl(asset.streamUrl)} alt={asset.name} loading="lazy" />
-                            </div>
-                          ) : (
-                            <div className="smc-row__icon">
-                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                <rect x="1" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.2"/>
-                              </svg>
-                            </div>
-                          )}
-
-                          <div className="smc-row__info">
-                            <span className="smc-row__name">{asset.name}</span>
-                            <div className="smc-row__meta">
-                              {asset.duration && <span>{asset.duration}</span>}
-                              {fmtBytes(asset.fileSizeBytes) && <span>{fmtBytes(asset.fileSizeBytes)}</span>}
-                              <time title={fmtAbsolute(asset.createdAt)}>{timeAgo(asset.createdAt)}</time>
-                            </div>
-                          </div>
-
-                          <div className="smc-row__actions">
-                            {asset.mediaKind === 'video' && asset.streamUrl && (
-                              <button
-                                className="btn btn-ghost btn-icon"
-                                type="button"
-                                onClick={() => setActiveVideoAsset(asset)}
-                                aria-label="Play"
-                                title="Play"
-                              >
+                          <div className="smc-row__main">
+                            {/* Thumbnail / icon */}
+                            {asset.mediaKind === 'video' && asset.streamUrl ? (
+                              <div className="smc-row__thumb">
+                                <VideoThumbnail
+                                  src={resolveApiUrl(asset.streamUrl)}
+                                  onClick={() => setActiveVideoAsset(asset)}
+                                  aspect={16 / 9}
+                                />
+                              </div>
+                            ) : isImg && asset.streamUrl ? (
+                              <div className="smc-row__thumb smc-row__thumb--img">
+                                <img src={resolveApiUrl(asset.streamUrl)} alt={asset.name} loading="lazy" />
+                              </div>
+                            ) : (
+                              <div className="smc-row__icon">
                                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                  <path d="M4 2.5v7l5-3.5-5-3.5Z" fill="currentColor"/>
+                                  <rect x="1" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.2"/>
+                                </svg>
+                              </div>
+                            )}
+
+                            <div className="smc-row__info">
+                              <span className="smc-row__name">{asset.name}</span>
+                              <div className="smc-row__meta">
+                                {asset.duration && <span>{asset.duration}</span>}
+                                {fmtBytes(asset.fileSizeBytes) && <span>{fmtBytes(asset.fileSizeBytes)}</span>}
+                                <time title={fmtAbsolute(asset.createdAt)}>{timeAgo(asset.createdAt)}</time>
+                              </div>
+                            </div>
+
+                            <div className="smc-row__actions">
+                              {asset.mediaKind === 'video' && asset.streamUrl && (
+                                <button
+                                  className="btn btn-ghost btn-icon"
+                                  type="button"
+                                  onClick={() => setActiveVideoAsset(asset)}
+                                  aria-label="Play"
+                                  title="Play"
+                                >
+                                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                    <path d="M4 2.5v7l5-3.5-5-3.5Z" fill="currentColor"/>
+                                  </svg>
+                                </button>
+                              )}
+                              {/* Notes button — outside 3-dots */}
+                              <button
+                                className={`btn btn-ghost btn-icon asset-notes-toggle${notesOpen ? ' active' : ''}`}
+                                type="button"
+                                onClick={() => toggleAssetNotes(asset.id)}
+                                aria-label={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
+                                title={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
+                              >
+                                {asset.notes.length > 0 && <span className="asset-notes-badge">{asset.notes.length}</span>}
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                  <path d="M2 2.5h8v5.5H5l-2.5 2v-2H2v-5.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
                                 </svg>
                               </button>
-                            )}
-                            {asset.downloadUrl && (
-                              <a
-                                className="btn btn-ghost btn-icon"
-                                href={resolveApiUrl(asset.downloadUrl)}
-                                target="_blank"
-                                rel="noreferrer"
-                                aria-label="Download"
-                                title="Download"
-                              >
-                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                  <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                              </a>
-                            )}
-                            <button
-                              className="btn btn-ghost btn-icon"
-                              type="button"
-                              onClick={() => startEditAsset(asset)}
-                              aria-label="Edit"
-                              title="Edit"
-                            >
-                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                <path d="M8.5 1.5l2 2L4 10H2V8L8.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-                              </svg>
-                            </button>
-                            <button
-                              className="btn btn-danger btn-icon"
-                              type="button"
-                              onClick={() => removeAsset(asset)}
-                              aria-label="Remove"
-                              title="Remove"
-                            >
-                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                <path d="M2.5 3h7M4.5 3V2h3v1M5 5v4M7 5v4M3.5 3l.4 6.2a1 1 0 001 .8h1.2a1 1 0 001-.8L8 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                              </svg>
-                            </button>
+                              {/* Overflow (3-dots) menu */}
+                              <div className="asset-overflow">
+                                <button
+                                  className="btn btn-ghost btn-icon asset-overflow__trigger"
+                                  type="button"
+                                  onClick={() => setOpenOverflowId(openOverflowId === asset.id ? null : asset.id)}
+                                  aria-label="More options"
+                                  title="More options"
+                                >
+                                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                    <circle cx="2" cy="6" r="1" fill="currentColor"/>
+                                    <circle cx="6" cy="6" r="1" fill="currentColor"/>
+                                    <circle cx="10" cy="6" r="1" fill="currentColor"/>
+                                  </svg>
+                                </button>
+                                {openOverflowId === asset.id && (
+                                  <div className="asset-overflow__menu" role="menu">
+                                    <button
+                                      className="asset-overflow__item"
+                                      type="button"
+                                      role="menuitem"
+                                      onClick={() => { startEditAsset(asset); setOpenOverflowId(null); }}
+                                    >
+                                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                        <path d="M8.5 1.5l2 2L4 10H2V8L8.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                                      </svg>
+                                      Edit
+                                    </button>
+                                    {asset.downloadUrl && (
+                                      <a
+                                        className="asset-overflow__item"
+                                        href={resolveApiUrl(asset.downloadUrl)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        role="menuitem"
+                                        onClick={() => setOpenOverflowId(null)}
+                                      >
+                                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                          <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                        </svg>
+                                        Download
+                                      </a>
+                                    )}
+                                    <button
+                                      className="asset-overflow__item asset-overflow__item--danger"
+                                      type="button"
+                                      role="menuitem"
+                                      onClick={() => { removeAsset(asset); setOpenOverflowId(null); }}
+                                    >
+                                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                        <path d="M2.5 3h7M4.5 3V2h3v1M5 5v4M7 5v4M3.5 3l.4 6.2a1 1 0 001 .8h1.2a1 1 0 001-.8L8 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                      </svg>
+                                      Delete
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           </div>
 
                           {editingAssetId === asset.id && (
@@ -1134,6 +1225,55 @@ export function SongWorkspacePage() {
                                   </svg>
                                 </button>
                               </div>
+                            </div>
+                          )}
+
+                          {/* Collapsible notes */}
+                          {notesOpen && (
+                            <div className="asset-notes-area">
+                              <div className="form-stack">
+                                <textarea
+                                  className="textarea"
+                                  value={assetNoteDrafts[asset.id] ?? ''}
+                                  onChange={e => setAssetNoteDrafts(d => ({ ...d, [asset.id]: e.target.value }))}
+                                  placeholder="Notes for this asset..."
+                                  style={{ minHeight: '60px' }}
+                                />
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  type="button"
+                                  style={{ alignSelf: 'flex-start' }}
+                                  onClick={() => addAssetNote(asset)}
+                                >
+                                  Add note
+                                </button>
+                              </div>
+                              {asset.notes.length > 0 && (
+                                <ul className="note-list">
+                                  {asset.notes.map(note => (
+                                    <li key={note.id} className="note-item">
+                                      <div className="note-item__meta">
+                                        <span className="note-item__author">{note.author}</span>
+                                        <time className="note-item__time" dateTime={note.createdAt} title={fmtAbsolute(note.createdAt)}>
+                                          {timeAgo(note.createdAt)}
+                                        </time>
+                                        <button
+                                          className="btn btn-ghost btn-icon note-item__delete"
+                                          type="button"
+                                          onClick={() => deleteAssetNote(asset.id, note.id)}
+                                          aria-label="Delete note"
+                                          title="Delete note"
+                                        >
+                                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                            <path d="M2 3h8M5 3V2h2v1M3 3l.5 7h5L9 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                          </svg>
+                                        </button>
+                                      </div>
+                                      <p className="note-item__body">{note.body}</p>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
                             </div>
                           )}
                         </div>

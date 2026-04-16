@@ -8,6 +8,13 @@ export type AssetCategory = 'Song Audio' | 'Social Media Content' | 'Videos' | '
 
 export type ProjectAssetCategory = 'Shot List' | 'Filming Clip' | 'Trailer Version' | 'Trailer Audio' | 'Other';
 
+export interface ProjectAssetNote {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+}
+
 export interface ProjectAsset {
   id: string;
   name: string;
@@ -19,6 +26,7 @@ export interface ProjectAsset {
   isLink: boolean;
   downloadUrl: string;
   createdAt: string;
+  notes: ProjectAssetNote[];
 }
 
 export interface AuthUser {

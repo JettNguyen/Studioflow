@@ -1,5 +1,8 @@
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 const apiBaseUrl = configuredApiBaseUrl || (import.meta.env.PROD ? '/api' : 'http://localhost:4000/api');
+// VITE_UPLOAD_BASE_URL lets large file uploads bypass Vercel's proxy (which has payload/timeout limits).
+// Set it to the direct Railway API URL in Vercel env vars, e.g. https://studioflowapi-production.up.railway.app/api
+const uploadBaseUrl = import.meta.env.VITE_UPLOAD_BASE_URL || apiBaseUrl;
 const apiOrigin = /^https?:\/\//i.test(apiBaseUrl)
   ? apiBaseUrl.replace(/\/api\/?$/, '')
   : '';
@@ -33,7 +36,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 }
 
 export async function apiUpload<T>(path: string, formData: FormData, options: Omit<RequestInit, 'body'> = {}) {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await fetch(`${uploadBaseUrl}${path}`, {
     method: 'POST',
     credentials: 'include',
     ...options,
@@ -56,7 +59,7 @@ export function apiUploadWithProgress<T>(
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${apiBaseUrl}${path}`);
+    xhr.open('POST', `${uploadBaseUrl}${path}`);
     xhr.withCredentials = true;
 
     xhr.upload.addEventListener('progress', e => {

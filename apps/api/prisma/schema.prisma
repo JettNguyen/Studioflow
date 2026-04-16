@@ -16,8 +16,9 @@ model User {
   passwordHash    String?
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
-  assetNotes      AssetNote[]
-  auditLogs       AuditLog[]
+  assetNotes            AssetNote[]
+  projectAssetNotes     ProjectAssetNote[]
+  auditLogs             AuditLog[]
   notes           Note[]
   oauthAccounts   OAuthAccount[]
   createdProjects Project[]           @relation("ProjectCreator")
@@ -62,21 +63,34 @@ model Project {
 }
 
 model ProjectAsset {
-  id            String   @id @default(cuid())
+  id            String               @id @default(cuid())
   projectId     String
   name          String
-  type          String   @default("")
-  category      String   @default("Other")
-  versionGroup  String   @default("legacy")
-  versionNumber Int      @default(1)
+  type          String               @default("")
+  category      String               @default("Other")
+  versionGroup  String               @default("legacy")
+  versionNumber Int                  @default(1)
   fileSizeBytes Int?
   storageKey    String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  driveFileId   String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  project       Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  notes         ProjectAssetNote[]
 
   @@index([projectId])
   @@index([projectId, versionGroup, versionNumber])
+}
+
+model ProjectAssetNote {
+  id        String       @id @default(cuid())
+  assetId   String
+  authorId  String
+  body      String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  asset     ProjectAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  author    User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
 }
 
 model ProjectMembership {

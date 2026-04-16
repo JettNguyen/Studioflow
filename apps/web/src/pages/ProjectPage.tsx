@@ -22,6 +22,13 @@ const PROJECT_ASSET_CATEGORY_SUGGESTIONS = [
 
 type ProjectAssetCategory = string;
 
+type ProjectAssetNote = {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+};
+
 type ProjectAsset = {
   id: string;
   name: string;
@@ -33,6 +40,7 @@ type ProjectAsset = {
   isLink: boolean;
   downloadUrl: string;
   createdAt: string;
+  notes: ProjectAssetNote[];
 };
 
 function fmtFileBytes(bytes: number | null): string {
@@ -87,6 +95,19 @@ export function ProjectPage() {
   const [previewingAssetId, setPreviewingAssetId] = useState<string | null>(null);
   const [selectedVersionByGroup, setSelectedVersionByGroup] = useState<Record<string, string>>({});
   const miscFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Notes + overflow menu for project assets
+  const [openAssetNotes, setOpenAssetNotes] = useState<Set<string>>(new Set());
+  const [assetNoteDrafts, setAssetNoteDrafts] = useState<Record<string, string>>({});
+  const [openOverflowId, setOpenOverflowId] = useState<string | null>(null);
+
+  // Close overflow menu on outside click
+  useEffect(() => {
+    if (!openOverflowId) return;
+    const handleClick = () => setOpenOverflowId(null);
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [openOverflowId]);
 
   const toggleFolder = (folder: string) => {
     setCollapsedFolders(prev => {
@@ -368,6 +389,35 @@ export function ProjectPage() {
       setMiscAssets(prev => prev.filter(a => a.id !== assetId));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove file');
+    }
+  };
+
+  const addProjectAssetNote = async (assetId: string) => {
+    const body = (assetNoteDrafts[assetId] ?? '').trim();
+    if (!body || !projectId) return;
+    try {
+      const note = await apiRequest<ProjectAssetNote>(
+        `/projects/${projectId}/assets/${assetId}/notes`,
+        { method: 'POST', body: { body } }
+      );
+      setMiscAssets(prev => prev.map(a =>
+        a.id === assetId ? { ...a, notes: [...a.notes, note] } : a
+      ));
+      setAssetNoteDrafts(prev => ({ ...prev, [assetId]: '' }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add note');
+    }
+  };
+
+  const deleteProjectAssetNote = async (assetId: string, noteId: string) => {
+    if (!projectId) return;
+    try {
+      await apiRequest(`/projects/${projectId}/assets/${assetId}/notes/${noteId}`, { method: 'DELETE' });
+      setMiscAssets(prev => prev.map(a =>
+        a.id === assetId ? { ...a, notes: a.notes.filter(n => n.id !== noteId) } : a
+      ));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete note');
     }
   };
 
@@ -862,40 +912,71 @@ export function ProjectPage() {
                             )}
                           </button>
                         )}
-                        <a
-                          className="btn btn-ghost btn-icon"
-                          href={asset.isLink ? asset.downloadUrl : assetSrc}
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-label={asset.isLink ? 'Open link' : 'Download'}
-                          title={asset.isLink ? 'Open link' : 'Download'}
+
+                        <button
+                          className={`btn btn-ghost btn-icon asset-notes-toggle${openAssetNotes.has(asset.id) ? ' active' : ''}`}
+                          type="button"
+                          onClick={() => {
+                            setOpenAssetNotes(prev => {
+                              const next = new Set(prev);
+                              if (next.has(asset.id)) next.delete(asset.id);
+                              else next.add(asset.id);
+                              return next;
+                            });
+                          }}
+                          aria-label="Notes"
+                          title="Notes"
                         >
                           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                            {asset.isLink ? (
-                              <path d="M4 2.5h5.5V8M9.5 2.5 2.5 9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                            ) : (
-                              <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                            )}
+                            <path d="M2 2h8v6H5l-3 2V2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
                           </svg>
-                        </a>
-                        <button
-                          className="btn btn-ghost btn-icon"
-                          type="button"
-                          onClick={() => startEditMiscAsset(asset)}
-                          aria-label="Edit"
-                          title="Edit"
-                        >
-                          <FontAwesomeIcon icon={faPencil} />
+                          {asset.notes.length > 0 && <span className="asset-notes-badge">{asset.notes.length}</span>}
                         </button>
-                        <button
-                          className="btn btn-danger btn-icon"
-                          type="button"
-                          onClick={() => deleteMiscAsset(asset.id, asset.name)}
-                          aria-label="Remove"
-                          title="Remove"
-                        >
-                          <FontAwesomeIcon icon={faTrash} />
-                        </button>
+
+                        <div className="asset-overflow" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            className="btn btn-ghost btn-icon asset-overflow__trigger"
+                            type="button"
+                            aria-label="More actions"
+                            title="More actions"
+                            onClick={() => setOpenOverflowId(openOverflowId === asset.id ? null : asset.id)}
+                          >
+                            <span className="asset-overflow__dots">⋯</span>
+                          </button>
+                          {openOverflowId === asset.id && (
+                            <div className="asset-overflow__menu" role="menu">
+                              <button
+                                className="asset-overflow__item"
+                                type="button"
+                                onClick={() => {
+                                  startEditMiscAsset(asset);
+                                  setOpenOverflowId(null);
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <a
+                                className="asset-overflow__item"
+                                href={asset.isLink ? asset.downloadUrl : assetSrc}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={() => setOpenOverflowId(null)}
+                              >
+                                {asset.isLink ? 'Open link' : 'Download'}
+                              </a>
+                              <button
+                                className="asset-overflow__item asset-overflow__item--danger"
+                                type="button"
+                                onClick={() => {
+                                  deleteMiscAsset(asset.id, asset.name);
+                                  setOpenOverflowId(null);
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                     {versions.length > 1 && (
@@ -915,6 +996,48 @@ export function ProjectPage() {
                             </option>
                           ))}
                         </select>
+                      </div>
+                    )}
+                    {openAssetNotes.has(asset.id) && (
+                      <div className="asset-notes-area">
+                        {asset.notes.map((note) => (
+                          <div key={note.id} className="asset-note">
+                            <div className="asset-note__header">
+                              <span className="asset-note__author">{note.author}</span>
+                              <span className="asset-note__date">{new Date(note.createdAt).toLocaleString()}</span>
+                              <button
+                                className="btn btn-ghost btn-icon asset-note__delete"
+                                type="button"
+                                onClick={() => deleteProjectAssetNote(asset.id, note.id)}
+                                aria-label="Delete note"
+                                title="Delete note"
+                              >
+                                <FontAwesomeIcon icon={faTrash} />
+                              </button>
+                            </div>
+                            <p className="asset-note__body">{note.body}</p>
+                          </div>
+                        ))}
+
+                        <div className="asset-note-form">
+                          <textarea
+                            className="input asset-note-input"
+                            rows={2}
+                            placeholder="Add a note..."
+                            value={assetNoteDrafts[asset.id] ?? ''}
+                            onChange={(e) => setAssetNoteDrafts((prev) => ({ ...prev, [asset.id]: e.target.value }))}
+                          />
+                          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                              className="btn btn-primary btn-sm"
+                              type="button"
+                              disabled={!(assetNoteDrafts[asset.id] ?? '').trim()}
+                              onClick={() => addProjectAssetNote(asset.id)}
+                            >
+                              Add note
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     )}
                     {isPreviewing && (

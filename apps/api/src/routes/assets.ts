@@ -333,3 +333,22 @@ assetRouter.post('/:assetId/notes', async (req, res) => {
     createdAt: note.createdAt.toISOString()
   });
 });
+
+assetRouter.delete('/:assetId/notes/:noteId', async (req, res) => {
+  const asset = await findAuthorizedAsset(req.params.assetId, req.user!.id);
+
+  if (!asset) {
+    return res.status(404).json({ message: 'Asset not found' });
+  }
+
+  const note = await prisma.assetNote.findFirst({
+    where: { id: req.params.noteId, assetId: asset.id }
+  });
+
+  if (!note) {
+    return res.status(404).json({ message: 'Note not found' });
+  }
+
+  await prisma.assetNote.delete({ where: { id: note.id } });
+  res.status(204).send();
+});

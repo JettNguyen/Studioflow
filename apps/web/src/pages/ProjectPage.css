@@ -310,7 +310,7 @@
   border: 1px solid var(--border);
   border-radius: var(--r-3);
   background: var(--surface);
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* Wrapper that holds the toggle button + action buttons in one bar */
@@ -490,5 +490,155 @@
 .btn-ghost--active {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* ── Notes toggle + badge ── */
+.asset-notes-toggle {
+  position: relative;
+}
+
+.asset-notes-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 9px;
+  background: #9966cc;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* ── 3-dots overflow menu ── */
+.asset-overflow {
+  position: relative;
+}
+
+.asset-overflow__trigger {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.asset-overflow__dots {
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+
+.asset-overflow__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 300;
+  min-width: 130px;
+  background: #1c1c1c;
+  border: 1px solid var(--border-mid);
+  border-radius: var(--r-2);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  gap: 2px;
+}
+
+.asset-overflow__item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--r-1);
+  font-size: 13px;
+  color: var(--text);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.12s;
+}
+
+.asset-overflow__item:hover {
+  background: var(--surface-hover);
+}
+
+.asset-overflow__item--danger {
+  color: var(--red);
+}
+
+.asset-overflow__item--danger:hover {
+  background: var(--red-subtle);
+}
+
+/* ── Asset notes area ── */
+.asset-notes-area {
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.asset-note {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  background: var(--surface-raised);
+  border-radius: var(--r-2);
+}
+
+.asset-note__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.asset-note__author {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.asset-note__date {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.asset-note__delete {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.asset-note:hover .asset-note__delete {
+  opacity: 1;
+}
+
+.asset-note__body {
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.asset-note-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.asset-note-input {
+  resize: none;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
