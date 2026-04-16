@@ -550,6 +550,16 @@
   gap: 2px;
 }
 
+.asset-overflow__menu--left {
+  left: 0;
+  right: auto;
+}
+
+.asset-overflow__menu--right {
+  right: 0;
+  left: auto;
+}
+
 .asset-overflow__item {
   display: block;
   width: 100%;

@@ -6,6 +6,7 @@ import { faPencil, faCheck, faXmark, faTrash } from '@fortawesome/free-solid-svg
 import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
 import { useDropZone } from '../context/DropZoneContext';
 import { Breadcrumb } from '../components/Breadcrumb';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { WaveformPlayer } from '../components/WaveformPlayer';
 import './ProjectPage.css';
 
@@ -41,6 +42,14 @@ type ProjectAsset = {
   downloadUrl: string;
   createdAt: string;
   notes: ProjectAssetNote[];
+};
+
+type ConfirmState = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  tone?: 'default' | 'danger';
+  onConfirm: () => Promise<void> | void;
 };
 
 function fmtFileBytes(bytes: number | null): string {
@@ -100,6 +109,8 @@ export function ProjectPage() {
   const [openAssetNotes, setOpenAssetNotes] = useState<Set<string>>(new Set());
   const [assetNoteDrafts, setAssetNoteDrafts] = useState<Record<string, string>>({});
   const [openOverflowId, setOpenOverflowId] = useState<string | null>(null);
+  const [openOverflowAlign, setOpenOverflowAlign] = useState<'left' | 'right'>('right');
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
   // Close overflow menu on outside click
   useEffect(() => {
@@ -108,6 +119,22 @@ export function ProjectPage() {
     document.addEventListener('click', handleClick);
     return () => document.removeEventListener('click', handleClick);
   }, [openOverflowId]);
+
+  const getOverflowAlign = (element: HTMLElement): 'left' | 'right' => {
+    const menuWidth = 160;
+    const rect = element.getBoundingClientRect();
+    const spaceLeft = rect.left;
+    const spaceRight = window.innerWidth - rect.right;
+    return spaceRight < menuWidth && spaceLeft > spaceRight ? 'right' : 'left';
+  };
+
+  const openConfirm = (state: ConfirmState) => setConfirmState(state);
+
+  const handleConfirm = async () => {
+    if (!confirmState) return;
+    await confirmState.onConfirm();
+    setConfirmState(null);
+  };
 
   const toggleFolder = (folder: string) => {
     setCollapsedFolders(prev => {
@@ -309,7 +336,6 @@ export function ProjectPage() {
   };
 
   const deleteSong = async (songId: string, songTitle: string) => {
-    if (!window.confirm(`Delete "${songTitle}"? This will remove all its assets, notes, and tasks permanently.`)) return;
     try {
       await apiRequest(`/songs/${songId}`, { method: 'DELETE' });
       setPreviewSongs(prev => prev.filter(s => s.id !== songId));
@@ -383,7 +409,7 @@ export function ProjectPage() {
   };
 
   const deleteMiscAsset = async (assetId: string, assetName: string) => {
-    if (!projectId || !window.confirm(`Remove "${assetName}"? This cannot be undone.`)) return;
+    if (!projectId) return;
     try {
       await apiRequest(`/projects/${projectId}/assets/${assetId}`, { method: 'DELETE' });
       setMiscAssets(prev => prev.filter(a => a.id !== assetId));
@@ -659,7 +685,13 @@ export function ProjectPage() {
                   <button className="btn btn-ghost btn-icon" onClick={() => setEditingSongId(null)} aria-label="Cancel">
                     <FontAwesomeIcon icon={faXmark} />
                   </button>
-                  <button className="btn btn-danger btn-icon" onClick={() => deleteSong(song.id, song.title)} aria-label={`Delete ${song.title}`}>
+                  <button className="btn btn-danger btn-icon" onClick={() => openConfirm({
+                    title: 'Delete song?',
+                    message: `Delete "${song.title}"? This will remove all its assets, notes, and tasks permanently.`,
+                    confirmLabel: 'Delete',
+                    tone: 'danger',
+                    onConfirm: async () => { await deleteSong(song.id, song.title); }
+                  })} aria-label={`Delete ${song.title}`}>
                     <FontAwesomeIcon icon={faTrash} />
                   </button>
                 </span>
@@ -939,12 +971,16 @@ export function ProjectPage() {
                             type="button"
                             aria-label="More actions"
                             title="More actions"
-                            onClick={() => setOpenOverflowId(openOverflowId === asset.id ? null : asset.id)}
+                            onClick={(event) => {
+                              const nextId = openOverflowId === asset.id ? null : asset.id;
+                              setOpenOverflowAlign(getOverflowAlign(event.currentTarget));
+                              setOpenOverflowId(nextId);
+                            }}
                           >
                             <span className="asset-overflow__dots">⋯</span>
                           </button>
                           {openOverflowId === asset.id && (
-                            <div className="asset-overflow__menu" role="menu">
+                            <div className={`asset-overflow__menu asset-overflow__menu--${openOverflowAlign}`} role="menu">
                               <button
                                 className="asset-overflow__item"
                                 type="button"
@@ -968,8 +1004,14 @@ export function ProjectPage() {
                                 className="asset-overflow__item asset-overflow__item--danger"
                                 type="button"
                                 onClick={() => {
-                                  deleteMiscAsset(asset.id, asset.name);
                                   setOpenOverflowId(null);
+                                  openConfirm({
+                                    title: 'Delete project file?',
+                                    message: `Remove "${asset.name}"? This cannot be undone.`,
+                                    confirmLabel: 'Delete',
+                                    tone: 'danger',
+                                    onConfirm: async () => { await deleteMiscAsset(asset.id, asset.name); }
+                                  });
                                 }}
                               >
                                 Delete
@@ -1126,6 +1168,15 @@ export function ProjectPage() {
           <p className="misc-empty">No project files yet. Upload trailer clips, shot lists, and other assets here.</p>
         )}
       </div>
+      <ConfirmModal
+        open={confirmState !== null}
+        title={confirmState?.title ?? ''}
+        message={confirmState?.message ?? ''}
+        confirmLabel={confirmState?.confirmLabel ?? 'Confirm'}
+        tone={confirmState?.tone ?? 'default'}
+        onCancel={() => setConfirmState(null)}
+        onConfirm={handleConfirm}
+      />
     </section>
   );
 }

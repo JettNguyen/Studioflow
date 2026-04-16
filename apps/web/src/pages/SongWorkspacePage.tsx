@@ -14,11 +14,19 @@ import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
 import { analyzeAudioFile, type AudioFeatures } from '../lib/audioAnalysis';
 import { useDropZone } from '../context/DropZoneContext';
 import { Breadcrumb } from '../components/Breadcrumb';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { WaveformPlayer } from '../components/WaveformPlayer';
 import { VideoThumbnail } from '../components/VideoThumbnail';
 import './SongWorkspacePage.css';
 
 type SongWorkspaceWithLyrics = SongWorkspace & { lyrics?: string | null; shotListUrl?: string | null };
+type ConfirmState = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  tone?: 'default' | 'danger';
+  onConfirm: () => Promise<void> | void;
+};
 
 const VERSIONED_CATEGORIES: AssetCategory[] = ['Song Audio', 'Videos', 'Beat', 'Stems'];
 const CATEGORY_ORDER: AssetCategory[] = ['Song Audio', 'Beat', 'Stems', 'Videos', 'Social Media Content'];
@@ -145,14 +153,32 @@ export function SongWorkspacePage() {
 
   // Open overflow (3-dots) menu id
   const [openOverflowId, setOpenOverflowId] = useState<string | null>(null);
+  const [openOverflowAlign, setOpenOverflowAlign] = useState<'left' | 'right'>('right');
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
   // Close overflow menu when clicking outside
   useEffect(() => {
     if (!openOverflowId) return;
     const handler = () => setOpenOverflowId(null);
-    document.addEventListener('click', handler, { capture: true });
-    return () => document.removeEventListener('click', handler, { capture: true });
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
   }, [openOverflowId]);
+
+  const getOverflowAlign = (element: HTMLElement): 'left' | 'right' => {
+    const menuWidth = 160;
+    const rect = element.getBoundingClientRect();
+    const spaceLeft = rect.left;
+    const spaceRight = window.innerWidth - rect.right;
+    return spaceRight < menuWidth && spaceLeft > spaceRight ? 'right' : 'left';
+  };
+
+  const openConfirm = (state: ConfirmState) => setConfirmState(state);
+
+  const handleConfirm = async () => {
+    if (!confirmState) return;
+    await confirmState.onConfirm();
+    setConfirmState(null);
+  };
 
   // ── Global drag-and-drop (desktop only) ──────────────────────────────────
   const { registerHandler } = useDropZone();
@@ -398,7 +424,7 @@ export function SongWorkspacePage() {
   };
 
   const removeAsset = async (asset: SongAsset) => {
-    if (!song || !window.confirm(`Remove "${asset.name}"? This cannot be undone.`)) return;
+    if (!song) return;
     try {
       await apiRequest(`/assets/${asset.id}`, { method: 'DELETE' });
       setSong({ ...song, assets: song.assets.filter(a => a.id !== asset.id) });
@@ -475,7 +501,7 @@ export function SongWorkspacePage() {
   };
 
   const removeShotList = async () => {
-    if (!songId || !window.confirm('Remove the shot list link from this song?')) return;
+    if (!songId) return;
     try {
       const updated = await apiRequest<SongWorkspaceWithLyrics>(`/songs/${songId}`, {
         method: 'PATCH',
@@ -621,11 +647,15 @@ export function SongWorkspacePage() {
             </svg>
           </button>
           {/* Overflow (3-dots) menu */}
-          <div className="asset-overflow">
+          <div className="asset-overflow" onClick={(event) => event.stopPropagation()}>
             <button
               className="btn btn-ghost btn-icon asset-overflow__trigger"
               type="button"
-              onClick={() => setOpenOverflowId(openOverflowId === asset.id ? null : asset.id)}
+              onClick={(event) => {
+                const nextId = openOverflowId === asset.id ? null : asset.id;
+                setOpenOverflowAlign(getOverflowAlign(event.currentTarget));
+                setOpenOverflowId(nextId);
+              }}
               aria-label="More options"
               title="More options"
             >
@@ -636,16 +666,13 @@ export function SongWorkspacePage() {
               </svg>
             </button>
             {openOverflowId === asset.id && (
-              <div className="asset-overflow__menu" role="menu">
+              <div className={`asset-overflow__menu asset-overflow__menu--${openOverflowAlign}`} role="menu">
                 <button
                   className="asset-overflow__item"
                   type="button"
                   role="menuitem"
                   onClick={() => { startEditAsset(asset); setOpenOverflowId(null); }}
                 >
-                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                    <path d="M8.5 1.5l2 2L4 10H2V8L8.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-                  </svg>
                   Edit
                 </button>
                 {asset.downloadUrl && (
@@ -657,9 +684,6 @@ export function SongWorkspacePage() {
                     role="menuitem"
                     onClick={() => setOpenOverflowId(null)}
                   >
-                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                      <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
                     Download
                   </a>
                 )}
@@ -667,11 +691,17 @@ export function SongWorkspacePage() {
                   className="asset-overflow__item asset-overflow__item--danger"
                   type="button"
                   role="menuitem"
-                  onClick={() => { removeAsset(asset); setOpenOverflowId(null); }}
+                  onClick={() => {
+                    setOpenOverflowId(null);
+                    openConfirm({
+                      title: 'Delete asset?',
+                      message: `Remove "${asset.name}"? This cannot be undone.`,
+                      confirmLabel: 'Delete',
+                      tone: 'danger',
+                      onConfirm: async () => { await removeAsset(asset); }
+                    });
+                  }}
                 >
-                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                    <path d="M2.5 3h7M4.5 3V2h3v1M5 5v4M7 5v4M3.5 3l.4 6.2a1 1 0 001 .8h1.2a1 1 0 001-.8L8 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
                   Delete
                 </button>
               </div>
@@ -1021,7 +1051,13 @@ export function SongWorkspacePage() {
                       <button
                         className="btn btn-danger btn-sm"
                         type="button"
-                        onClick={removeShotList}
+                        onClick={() => openConfirm({
+                          title: 'Remove shot list?',
+                          message: 'Remove the shot list link from this song?',
+                          confirmLabel: 'Remove',
+                          tone: 'danger',
+                          onConfirm: async () => { await removeShotList(); }
+                        })}
                         style={{ flexShrink: 0 }}
                       >
                         Remove
@@ -1120,11 +1156,15 @@ export function SongWorkspacePage() {
                                 </svg>
                               </button>
                               {/* Overflow (3-dots) menu */}
-                              <div className="asset-overflow">
+                              <div className="asset-overflow" onClick={(event) => event.stopPropagation()}>
                                 <button
                                   className="btn btn-ghost btn-icon asset-overflow__trigger"
                                   type="button"
-                                  onClick={() => setOpenOverflowId(openOverflowId === asset.id ? null : asset.id)}
+                                  onClick={(event) => {
+                                    const nextId = openOverflowId === asset.id ? null : asset.id;
+                                    setOpenOverflowAlign(getOverflowAlign(event.currentTarget));
+                                    setOpenOverflowId(nextId);
+                                  }}
                                   aria-label="More options"
                                   title="More options"
                                 >
@@ -1135,16 +1175,13 @@ export function SongWorkspacePage() {
                                   </svg>
                                 </button>
                                 {openOverflowId === asset.id && (
-                                  <div className="asset-overflow__menu" role="menu">
+                                  <div className={`asset-overflow__menu asset-overflow__menu--${openOverflowAlign}`} role="menu">
                                     <button
                                       className="asset-overflow__item"
                                       type="button"
                                       role="menuitem"
                                       onClick={() => { startEditAsset(asset); setOpenOverflowId(null); }}
                                     >
-                                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                        <path d="M8.5 1.5l2 2L4 10H2V8L8.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-                                      </svg>
                                       Edit
                                     </button>
                                     {asset.downloadUrl && (
@@ -1156,9 +1193,6 @@ export function SongWorkspacePage() {
                                         role="menuitem"
                                         onClick={() => setOpenOverflowId(null)}
                                       >
-                                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                          <path d="M6 1.5v6M3.5 5.5 6 8l2.5-2.5M2 9.5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                                        </svg>
                                         Download
                                       </a>
                                     )}
@@ -1166,11 +1200,17 @@ export function SongWorkspacePage() {
                                       className="asset-overflow__item asset-overflow__item--danger"
                                       type="button"
                                       role="menuitem"
-                                      onClick={() => { removeAsset(asset); setOpenOverflowId(null); }}
+                                      onClick={() => {
+                                        setOpenOverflowId(null);
+                                        openConfirm({
+                                          title: 'Delete asset?',
+                                          message: `Remove "${asset.name}"? This cannot be undone.`,
+                                          confirmLabel: 'Delete',
+                                          tone: 'danger',
+                                          onConfirm: async () => { await removeAsset(asset); }
+                                        });
+                                      }}
                                     >
-                                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                        <path d="M2.5 3h7M4.5 3V2h3v1M5 5v4M7 5v4M3.5 3l.4 6.2a1 1 0 001 .8h1.2a1 1 0 001-.8L8 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                                      </svg>
                                       Delete
                                     </button>
                                   </div>
@@ -1525,6 +1565,15 @@ export function SongWorkspacePage() {
           </div>
         </div>
       )}
+      <ConfirmModal
+        open={confirmState !== null}
+        title={confirmState?.title ?? ''}
+        message={confirmState?.message ?? ''}
+        confirmLabel={confirmState?.confirmLabel ?? 'Confirm'}
+        tone={confirmState?.tone ?? 'default'}
+        onCancel={() => setConfirmState(null)}
+        onConfirm={handleConfirm}
+      />
     </section>
     </>
   );
