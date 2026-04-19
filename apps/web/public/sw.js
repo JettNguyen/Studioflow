@@ -12,7 +12,7 @@
  * Cache names are versioned. Bump CACHE_VER to force all clients to update.
  */
 
-const CACHE_VER = 'v6';
+const CACHE_VER = 'v7';
 const STATIC  = `sf-static-${CACHE_VER}`;   // immutable assets + fonts
 const DYNAMIC = `sf-dynamic-${CACHE_VER}`;  // SPA shell + misc same-origin
 const API     = `sf-api-${CACHE_VER}`;      // API responses (short-lived)
@@ -92,6 +92,10 @@ self.addEventListener('fetch', event => {
     // detection and seeking on iOS Safari PWA (range responses aren't handled
     // correctly when proxied through a SW fetch).
     if (/\/assets\/[^/]+\/(stream|download)$/.test(url.pathname)) return;
+
+    // Skip cover and avatar image endpoints — they return short-lived presigned
+    // S3 redirects that must not be cached (URLs expire after 1 hour).
+    if (/\/(cover|avatar)/.test(url.pathname)) return;
 
     // Force credentials: 'include' for all API requests so that session cookies
     // are sent even for requests initiated by <img> or <audio> elements, which
