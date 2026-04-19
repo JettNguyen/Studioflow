@@ -2,6 +2,7 @@ import type { OAuthAccount } from '@prisma/client';
 import { createReadStream } from 'node:fs';
 import { google } from 'googleapis';
 import { env } from '../config.js';
+import { prisma } from '../lib/prisma.js';
 
 function getOAuthClient() {
   return new google.auth.OAuth2(env.googleClientId, env.googleClientSecret, env.googleRedirectUri);
@@ -17,6 +18,21 @@ function getAuthorizedClient(account: OAuthAccount) {
     refresh_token: account.refreshToken,
     access_token: account.accessToken ?? undefined,
     expiry_date: account.expiresAt ? account.expiresAt.getTime() : undefined
+  });
+
+  // Persist refreshed tokens back to DB so subsequent requests use the current
+  // access token directly instead of needing to refresh on every call.
+  oauthClient.on('tokens', (tokens) => {
+    const data: Record<string, unknown> = {};
+    if (tokens.access_token) data.accessToken = tokens.access_token;
+    if (tokens.refresh_token) data.refreshToken = tokens.refresh_token;
+    if (tokens.expiry_date) data.expiresAt = new Date(tokens.expiry_date);
+
+    if (Object.keys(data).length > 0) {
+      void prisma.oAuthAccount
+        .update({ where: { id: account.id }, data })
+        .catch(() => undefined); // non-fatal — best effort persistence
+    }
   });
 
   return oauthClient;
@@ -214,6 +230,36 @@ export async function createDriveFolder(account: OAuthAccount, folderName: strin
   return response.data.id ?? null;
 }
 
+/**
+ * Grants "anyone with the link" read access to a Drive file.
+ * Returns 'granted' if the permission was newly created, or 'already_ok' if it
+ * already existed. Throws for any other error (e.g. invalid token, file deleted).
+ *
+ * Idempotent — safe to call even if the permission already exists.
+ * Used both during upload and by the backfill migration script.
+ */
+export async function setDriveFilePublicRead(
+  account: OAuthAccount,
+  driveFileId: string
+): Promise<'granted' | 'already_ok'> {
+  const oauthClient = getAuthorizedClient(account);
+  const drive = google.drive({ version: 'v3', auth: oauthClient });
+
+  try {
+    await drive.permissions.create({
+      fileId: driveFileId,
+      requestBody: { type: 'anyone', role: 'reader' }
+    });
+    return 'granted';
+  } catch (err: unknown) {
+    // HTTP 400 from the Drive API means the permission already exists — idempotent success.
+    // GaxiosError exposes the HTTP status directly on err.status (gaxios ≥ 6).
+    const httpStatus = (err as { status?: number })?.status;
+    if (httpStatus === 400) return 'already_ok';
+    throw err;
+  }
+}
+
 export async function uploadDriveFile(
   account: OAuthAccount,
   input: {
@@ -238,7 +284,23 @@ export async function uploadDriveFile(
     fields: 'id'
   });
 
-  return response.data.id ?? null;
+  const fileId = response.data.id ?? null;
+
+  // Make the file readable by any authenticated Google user so that the server
+  // can retrieve it on behalf of any project member — not only the uploader's
+  // specific OAuth authorization. Without this, Drive files are private to the
+  // uploader's account and become inaccessible in new sessions or for collaborators.
+  if (fileId) {
+    try {
+      await setDriveFilePublicRead(account, fileId);
+    } catch (err: unknown) {
+      // Non-fatal: the file was uploaded successfully. The backfill script will
+      // set the permission if this fails (e.g. transient error, domain policy).
+      console.error('[Drive] Failed to set public-read permission on uploaded file:', fileId, err);
+    }
+  }
+
+  return fileId;
 }
 
 export async function deleteDriveFile(account: OAuthAccount, driveFileId: string) {

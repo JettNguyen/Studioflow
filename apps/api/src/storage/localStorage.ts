@@ -4,7 +4,10 @@ import { extname, resolve } from 'node:path';
 import crypto from 'node:crypto';
 import multer from 'multer';
 
-const uploadsDir = resolve(process.cwd(), 'uploads');
+// On Vercel (and other serverless runtimes) process.cwd() is read-only.
+// Fall back to the OS temp directory so multer can write temporary files.
+import { tmpdir } from 'node:os';
+const uploadsDir = process.env.VERCEL ? resolve(tmpdir(), 'studioflow-uploads') : resolve(process.cwd(), 'uploads');
 
 async function ensureUploadDir() {
   await mkdir(uploadsDir, { recursive: true });

@@ -25,12 +25,16 @@ if (env.googleEnabled) {
       async (
         accessToken: string,
         refreshToken: string,
+        params: { expires_in?: number },
         profile: Profile,
         done: VerifyCallback
       ) => {
         try {
           const email = profile.emails?.[0]?.value;
           const grantedScope = googleScopes.join(' ');
+          const expiresAt = typeof params.expires_in === 'number'
+            ? new Date(Date.now() + params.expires_in * 1000)
+            : null;
 
           if (!email) {
             return done(new Error('Google account did not return an email address.'));
@@ -57,7 +61,7 @@ if (env.googleEnabled) {
                     accessToken,
                     refreshToken: refreshToken || null,
                     scope: grantedScope,
-                    expiresAt: null
+                    expiresAt
                   }
                 }
               },
@@ -78,7 +82,7 @@ if (env.googleEnabled) {
                 accessToken,
                 refreshToken: refreshToken || undefined,
                 scope: grantedScope,
-                expiresAt: null
+                expiresAt
               },
               create: {
                 userId: user.id,
@@ -88,7 +92,7 @@ if (env.googleEnabled) {
                 accessToken,
                 refreshToken: refreshToken || null,
                 scope: grantedScope,
-                expiresAt: null
+                expiresAt
               }
             });
 

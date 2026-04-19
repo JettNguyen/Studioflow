@@ -14,7 +14,8 @@
     "prisma:push": "dotenv -e ../../.env -- prisma db push",
     "prisma:migrate": "dotenv -e ../../.env -- prisma migrate dev",
     "storage:check": "tsx src/scripts/checkS3.ts",
-    "storage:migrate-local-to-s3": "tsx src/scripts/migrateLocalStorageToS3.ts"
+    "storage:migrate-local-to-s3": "tsx src/scripts/migrateLocalStorageToS3.ts",
+    "drive:backfill-permissions": "dotenv -e ../../.env -- tsx src/scripts/backfillDrivePermissions.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.901.0",
