@@ -1,12 +1,13 @@
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
-const defaultProdApiBaseUrl = '/api';
-const apiBaseUrl = configuredApiBaseUrl || (import.meta.env.PROD ? defaultProdApiBaseUrl : 'http://localhost:4000/api');
-// In production, keep uploads on the frontend's same-origin /api rewrite so
-// cookies stay first-party and CORS does not block authenticated uploads.
-// Allow a custom upload base only in local/dev scenarios.
-const uploadBaseUrl = import.meta.env.PROD
-  ? apiBaseUrl
-  : (import.meta.env.VITE_UPLOAD_BASE_URL || apiBaseUrl);
+const defaultProdApiBaseUrl = 'https://studioflow-api-pi.vercel.app/api';
+const normalizedApiBaseUrl = configuredApiBaseUrl?.trim();
+const apiBaseUrl = normalizedApiBaseUrl && normalizedApiBaseUrl !== '/api'
+  ? normalizedApiBaseUrl
+  : (import.meta.env.PROD ? defaultProdApiBaseUrl : 'http://localhost:4000/api');
+const normalizedUploadBaseUrl = import.meta.env.VITE_UPLOAD_BASE_URL?.trim();
+const uploadBaseUrl = normalizedUploadBaseUrl && normalizedUploadBaseUrl !== '/api'
+  ? normalizedUploadBaseUrl
+  : apiBaseUrl;
 const apiOrigin = /^https?:\/\//i.test(apiBaseUrl)
   ? apiBaseUrl.replace(/\/api\/?$/, '')
   : '';
