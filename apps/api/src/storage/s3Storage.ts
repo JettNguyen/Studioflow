@@ -6,6 +6,7 @@ import {
   PutObjectCommand,
   S3Client
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { basename } from 'node:path';
@@ -153,6 +154,26 @@ export async function getS3ObjectWithLegacyFallback(storageKey: string) {
       );
 
       return { object, resolvedStorageKey: toS3StorageKey(key) };
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  throw new Error('S3 object not found for any key candidate');
+}
+
+// Returns a short-lived presigned GET URL, avoiding streaming image bytes through
+// the serverless function (which hits Vercel's 4.5 MB response payload limit).
+export async function getPresignedUrlWithLegacyFallback(storageKey: string, expiresIn = 3600) {
+  const client = getS3Client();
+  const candidates = legacyS3KeyCandidates(storageKey);
+
+  for (const key of candidates) {
+    try {
+      await client.send(new HeadObjectCommand({ Bucket: env.s3Bucket, Key: key }));
+      const command = new GetObjectCommand({ Bucket: env.s3Bucket, Key: key });
+      const url = await getSignedUrl(client, command, { expiresIn });
+      return { url, resolvedStorageKey: toS3StorageKey(key) };
     } catch {
       // Try next candidate.
     }

@@ -13,7 +13,7 @@ import { resolveStoredFilePath, uploadImage } from '../storage/localStorage.js';
 import {
   buildS3ObjectKey,
   deleteS3Object,
-  getS3ObjectWithLegacyFallback,
+  getPresignedUrlWithLegacyFallback,
   isS3StorageKey,
   uploadFileToS3
 } from '../storage/s3Storage.js';
@@ -207,7 +207,7 @@ authRouter.get('/me/avatar', requireAuth, async (req, res) => {
   // files may no longer exist.
   if (env.s3Enabled) {
     try {
-      const { object, resolvedStorageKey } = await getS3ObjectWithLegacyFallback(user.avatarStorageKey);
+      const { url, resolvedStorageKey } = await getPresignedUrlWithLegacyFallback(user.avatarStorageKey);
 
       // Self-heal legacy/plain keys so future requests avoid fallback probes.
       if (resolvedStorageKey !== user.avatarStorageKey) {
@@ -217,10 +217,8 @@ authRouter.get('/me/avatar', requireAuth, async (req, res) => {
         }).catch(() => undefined);
       }
 
-      res.setHeader('Content-Type', object.ContentType || 'image/jpeg');
-      res.setHeader('Cache-Control', 'private, max-age=86400');
-      (object.Body as NodeJS.ReadableStream).pipe(res);
-      return;
+      // Redirect to a presigned S3 URL — avoids Vercel's 4.5 MB response payload limit.
+      return res.redirect(302, url);
     } catch (err) {
       console.error('[S3 avatar error]', user.avatarStorageKey, err);
       // Fall through to local lookup for legacy local-only avatars.

@@ -11,7 +11,7 @@ import { resolveStoredFilePath, upload, uploadImage } from '../storage/localStor
 import {
   buildS3ObjectKey,
   deleteS3Object,
-  getS3ObjectWithLegacyFallback,
+  getPresignedUrlWithLegacyFallback,
   getS3ObjectWithRangeLegacyFallback,
   isS3StorageKey,
   uploadFileToS3
@@ -486,7 +486,7 @@ projectRouter.get('/:projectId/cover', async (req, res) => {
   // available across devices/sessions where local files may be absent.
   if (env.s3Enabled) {
     try {
-      const { object, resolvedStorageKey } = await getS3ObjectWithLegacyFallback(project.coverImageKey);
+      const { url, resolvedStorageKey } = await getPresignedUrlWithLegacyFallback(project.coverImageKey);
 
       // Self-heal cover key to canonical s3: form when a legacy candidate matches.
       if (resolvedStorageKey !== project.coverImageKey) {
@@ -496,10 +496,9 @@ projectRouter.get('/:projectId/cover', async (req, res) => {
         }).catch(() => undefined);
       }
 
-      res.setHeader('Content-Type', object.ContentType || 'image/jpeg');
-      res.setHeader('Cache-Control', 'private, max-age=86400');
-      (object.Body as NodeJS.ReadableStream).pipe(res);
-      return;
+      // Redirect to a presigned S3 URL so image bytes flow directly from S3 to the
+      // client — avoids Vercel's 4.5 MB serverless function response payload limit.
+      return res.redirect(302, url);
     } catch (err) {
       console.error('[S3 cover error]', project.coverImageKey, err);
       // Fall through to local lookup for local-only historical covers.
