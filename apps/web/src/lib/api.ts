@@ -1,13 +1,10 @@
-const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
-const defaultProdApiBaseUrl = 'https://studioflow-api-pi.vercel.app/api';
-const normalizedApiBaseUrl = configuredApiBaseUrl?.trim();
-const apiBaseUrl = normalizedApiBaseUrl && normalizedApiBaseUrl !== '/api'
-  ? normalizedApiBaseUrl
-  : (import.meta.env.PROD ? defaultProdApiBaseUrl : 'http://localhost:4000/api');
-const normalizedUploadBaseUrl = import.meta.env.VITE_UPLOAD_BASE_URL?.trim();
-const uploadBaseUrl = normalizedUploadBaseUrl && normalizedUploadBaseUrl !== '/api'
-  ? normalizedUploadBaseUrl
-  : apiBaseUrl;
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+// In production, default to the Vercel proxy (/api) so that session cookies are
+// set on the same domain as the frontend. This prevents Safari's ITP bounce
+// tracking mitigation from deleting cookies set via cross-domain OAuth redirects.
+const apiBaseUrl = configuredApiBaseUrl || (import.meta.env.PROD ? '/api' : 'http://localhost:4000/api');
+const configuredUploadBaseUrl = import.meta.env.VITE_UPLOAD_BASE_URL?.trim();
+const uploadBaseUrl = configuredUploadBaseUrl || apiBaseUrl;
 const apiOrigin = /^https?:\/\//i.test(apiBaseUrl)
   ? apiBaseUrl.replace(/\/api\/?$/, '')
   : '';
