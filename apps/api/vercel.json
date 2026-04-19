@@ -1,7 +1,7 @@
 {
   "version": 2,
-  "installCommand": "cd ../.. && npm install",
-  "buildCommand": "cd ../.. && npm run build --workspace @studioflow/shared && cd apps/api && npx prisma generate && npx tsc -p tsconfig.json",
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "builds": [
     {

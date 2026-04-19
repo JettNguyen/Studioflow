@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "prisma generate && tsc -p tsconfig.json",
+    "build": "tsc -p ../../packages/shared/tsconfig.json && prisma generate && tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "backfill:position": "dotenv -e ../../.env -- tsx src/scripts/addPositionAndBackfill.ts",
     "lint": "eslint .",
@@ -20,7 +20,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.901.0",
     "@prisma/client": "^6.6.0",
-    "@studioflow/shared": "0.1.0",
+    "@studioflow/shared": "file:../../packages/shared",
     "@types/compression": "^1.8.1",
     "bcryptjs": "^3.0.2",
     "compression": "^1.8.1",

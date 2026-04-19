@@ -36,6 +36,16 @@ type Counters = {
   skipped: number; // dry-run
 };
 
+type UserAvatarRow = {
+  id: string;
+  avatarStorageKey: string | null;
+};
+
+type ProjectCoverRow = {
+  id: string;
+  coverImageKey: string | null;
+};
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -87,16 +97,30 @@ async function grantPermission(
 async function backfillAvatars(): Promise<Counters> {
   const counters: Counters = { scanned: 0, granted: 0, alreadyOk: 0, noAccount: 0, failed: 0, skipped: 0 };
 
-  const users = await prisma.user.findMany({
-    where: { avatarStorageKey: { startsWith: 'drive:' } },
-    select: {
-      id: true,
-      avatarStorageKey: true,
-      oauthAccounts: {
-        where: { provider: 'google', refreshToken: { not: null } }
+  const users = await prisma.$queryRaw<UserAvatarRow[]>`
+    SELECT id, "avatarStorageKey"
+    FROM "User"
+    WHERE "avatarStorageKey" LIKE 'drive:%'
+  `;
+
+  const userIds = users.map((user) => user.id);
+  const accountsByUser = new Map<string, OAuthAccount[]>();
+
+  if (userIds.length) {
+    const oauthAccounts = await prisma.oAuthAccount.findMany({
+      where: {
+        userId: { in: userIds },
+        provider: 'google',
+        refreshToken: { not: null }
       }
+    });
+
+    for (const account of oauthAccounts) {
+      const existing = accountsByUser.get(account.userId) ?? [];
+      existing.push(account);
+      accountsByUser.set(account.userId, existing);
     }
-  });
+  }
 
   for (const user of users) {
     const key = user.avatarStorageKey;
@@ -106,13 +130,15 @@ async function backfillAvatars(): Promise<Counters> {
 
     counters.scanned++;
 
-    if (!user.oauthAccounts.length) {
+    const accounts = accountsByUser.get(user.id) ?? [];
+
+    if (!accounts.length) {
       console.log(`  [skip] no Drive account for user ${user.id} (avatar ${fileId})`);
       counters.noAccount++;
       continue;
     }
 
-    const result = await grantPermission(fileId, user.oauthAccounts, `avatar:${user.id}`);
+    const result = await grantPermission(fileId, accounts, `avatar:${user.id}`);
     if (result === 'granted') counters.granted++;
     else if (result === 'already_ok') counters.alreadyOk++;
     else if (result === 'failed') { counters.failed++; console.error(`  [error] avatar ${fileId} for user ${user.id}`); }
@@ -129,13 +155,18 @@ async function backfillAvatars(): Promise<Counters> {
 async function backfillCovers(): Promise<Counters> {
   const counters: Counters = { scanned: 0, granted: 0, alreadyOk: 0, noAccount: 0, failed: 0, skipped: 0 };
 
-  const projects = await prisma.project.findMany({
-    where: { coverImageKey: { startsWith: 'drive:' } },
-    select: {
-      id: true,
-      coverImageKey: true,
-      memberships: {
+  const projects = await prisma.$queryRaw<ProjectCoverRow[]>`
+    SELECT id, "coverImageKey"
+    FROM "Project"
+    WHERE "coverImageKey" LIKE 'drive:%'
+  `;
+
+  const projectIds = projects.map((project) => project.id);
+  const memberships = projectIds.length
+    ? await prisma.projectMembership.findMany({
+        where: { projectId: { in: projectIds } },
         select: {
+          projectId: true,
           user: {
             select: {
               oauthAccounts: {
@@ -144,9 +175,15 @@ async function backfillCovers(): Promise<Counters> {
             }
           }
         }
-      }
-    }
-  });
+      })
+    : [];
+
+  const accountsByProject = new Map<string, OAuthAccount[]>();
+  for (const membership of memberships) {
+    const existing = accountsByProject.get(membership.projectId) ?? [];
+    existing.push(...membership.user.oauthAccounts);
+    accountsByProject.set(membership.projectId, existing);
+  }
 
   for (const project of projects) {
     const key = project.coverImageKey;
@@ -156,10 +193,8 @@ async function backfillCovers(): Promise<Counters> {
 
     counters.scanned++;
 
-    // Collect all member accounts that have Drive connected.
-    const accounts = project.memberships
-      .flatMap((m) => m.user.oauthAccounts)
-      .filter((a): a is OAuthAccount => Boolean(a.refreshToken));
+    const accounts = (accountsByProject.get(project.id) ?? [])
+      .filter((account): account is OAuthAccount => Boolean(account.refreshToken));
 
     if (!accounts.length) {
       console.log(`  [skip] no Drive account for project ${project.id} (cover ${fileId})`);
