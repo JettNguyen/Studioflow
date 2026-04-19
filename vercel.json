@@ -1,21 +1,25 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
   "framework": "vite",
   "installCommand": "npm install",
   "buildCommand": "npm run build --workspace @studioflow/shared && npm run build --workspace @studioflow/web",
   "outputDirectory": "apps/web/dist",
-  "rewrites": [
+  "routes": [
     {
-      "source": "/api",
-      "destination": "https://studioflow-api-pi.vercel.app/api"
+      "src": "/api",
+      "dest": "https://studioflow-api-pi.vercel.app/api"
     },
     {
-      "source": "/api/(.*)",
-      "destination": "https://studioflow-api-pi.vercel.app/api/$1"
+      "src": "/api/(.*)",
+      "dest": "https://studioflow-api-pi.vercel.app/api/$1"
     },
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
     }
   ]
 }
