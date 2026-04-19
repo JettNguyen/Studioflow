@@ -523,6 +523,7 @@ projectRouter.post('/:projectId/cover', uploadImage.single('image'), async (req,
 
   const project = await prisma.project.findUnique({ where: { id: paramToString(req.params.projectId) } });
   if (!project) return res.status(404).json({ message: 'Project not found' });
+  const previousCoverImageKey = project.coverImageKey;
 
   const localFilePath = resolveStoredFilePath(req.file.filename);
   let storageKey = req.file.filename;
@@ -590,10 +591,46 @@ projectRouter.post('/:projectId/cover', uploadImage.single('image'), async (req,
 
   await unlink(localFilePath).catch(() => undefined);
 
-  // Delete previous cover if it exists
-  if (project?.coverImageKey) {
+  const nextCoverImageKey = env.s3Enabled ? storageKey : (driveFileId ? `drive:${driveFileId}` : storageKey);
+
+  let updated;
+  try {
+    updated = await prisma.project.update({
+      where: { id: paramToString(req.params.projectId) },
+      data: { coverImageKey: nextCoverImageKey },
+      include: {
+        songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
+        _count: { select: { projectAssets: true } }
+      }
+    });
+  } catch {
     try {
-      const previousDriveFileId = parseDriveFileId(project.coverImageKey);
+      const uploadedDriveFileId = parseDriveFileId(nextCoverImageKey);
+      if (uploadedDriveFileId) {
+        for (const account of driveAccounts) {
+          try {
+            await deleteDriveFile(account, uploadedDriveFileId);
+            break;
+          } catch {
+            // Try next account.
+          }
+        }
+      } else if (isS3StorageKey(nextCoverImageKey)) {
+        await deleteS3Object(nextCoverImageKey);
+      } else {
+        const uploadedPath = resolveStoredFilePath(nextCoverImageKey);
+        if (existsSync(uploadedPath)) await unlink(uploadedPath).catch(() => undefined);
+      }
+    } catch {
+      // best effort cleanup only
+    }
+
+    return res.status(500).json({ message: 'Failed to persist cover image metadata' });
+  }
+
+  if (previousCoverImageKey && previousCoverImageKey !== nextCoverImageKey) {
+    try {
+      const previousDriveFileId = parseDriveFileId(previousCoverImageKey);
       if (previousDriveFileId) {
         for (const account of driveAccounts) {
           try {
@@ -603,23 +640,14 @@ projectRouter.post('/:projectId/cover', uploadImage.single('image'), async (req,
             // Try next account.
           }
         }
-      } else if (isS3StorageKey(project.coverImageKey)) {
-        await deleteS3Object(project.coverImageKey);
+      } else if (isS3StorageKey(previousCoverImageKey)) {
+        await deleteS3Object(previousCoverImageKey);
       } else {
-        const prev = resolveStoredFilePath(project.coverImageKey);
+        const prev = resolveStoredFilePath(previousCoverImageKey);
         if (existsSync(prev)) await unlink(prev).catch(() => undefined);
       }
     } catch { /* non-fatal */ }
   }
-
-  const updated = await prisma.project.update({
-    where: { id: paramToString(req.params.projectId) },
-    data: { coverImageKey: env.s3Enabled ? storageKey : (driveFileId ? `drive:${driveFileId}` : storageKey) },
-    include: {
-      songs: { include: { assets: { select: { id: true } }, tasks: true }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
-      _count: { select: { projectAssets: true } }
-    }
-  });
 
   res.json(mapProjectDetails(updated));
 });

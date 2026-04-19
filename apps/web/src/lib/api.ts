@@ -1,10 +1,12 @@
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 const defaultProdApiBaseUrl = '/api';
 const apiBaseUrl = configuredApiBaseUrl || (import.meta.env.PROD ? defaultProdApiBaseUrl : 'http://localhost:4000/api');
-// VITE_UPLOAD_BASE_URL can override the default upload target when needed.
-// In production, prefer the frontend's same-origin /api rewrite so auth/session
-// cookies stay first-party during Google OAuth and subsequent API calls.
-const uploadBaseUrl = import.meta.env.VITE_UPLOAD_BASE_URL || apiBaseUrl;
+// In production, keep uploads on the frontend's same-origin /api rewrite so
+// cookies stay first-party and CORS does not block authenticated uploads.
+// Allow a custom upload base only in local/dev scenarios.
+const uploadBaseUrl = import.meta.env.PROD
+  ? apiBaseUrl
+  : (import.meta.env.VITE_UPLOAD_BASE_URL || apiBaseUrl);
 const apiOrigin = /^https?:\/\//i.test(apiBaseUrl)
   ? apiBaseUrl.replace(/\/api\/?$/, '')
   : '';

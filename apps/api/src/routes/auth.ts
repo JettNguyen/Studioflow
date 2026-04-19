@@ -239,6 +239,7 @@ authRouter.post('/me/avatar', requireAuth, uploadImage.single('image'), async (r
   if (!req.file) return res.status(400).json({ message: 'No image file provided' });
 
   const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+  const previousStorageKey = user?.avatarStorageKey ?? null;
   const localFilePath = resolveStoredFilePath(req.file.filename);
   let storageKey = req.file.filename;
 
@@ -287,10 +288,39 @@ authRouter.post('/me/avatar', requireAuth, uploadImage.single('image'), async (r
     return res.status(500).json({ message: 'Failed to store avatar' });
   }
 
-  // Delete old custom avatar
-  if (user?.avatarStorageKey) {
+  let updated;
+  try {
+    updated = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: { avatarStorageKey: storageKey },
+      include: { oauthAccounts: { where: { provider: 'google' } } }
+    });
+  } catch {
     try {
-      const previousDriveFileId = parseDriveFileId(user.avatarStorageKey);
+      const uploadedDriveFileId = parseDriveFileId(storageKey);
+      if (uploadedDriveFileId) {
+        const googleAccount = await prisma.oAuthAccount.findFirst({
+          where: { userId: req.user!.id, provider: 'google', refreshToken: { not: null } }
+        });
+        if (googleAccount) {
+          await deleteDriveFile(googleAccount, uploadedDriveFileId);
+        }
+      } else if (isS3StorageKey(storageKey)) {
+        await deleteS3Object(storageKey);
+      } else {
+        const uploadedPath = resolveStoredFilePath(storageKey);
+        if (existsSync(uploadedPath)) await unlink(uploadedPath).catch(() => undefined);
+      }
+    } catch {
+      // best effort cleanup only
+    }
+
+    return res.status(500).json({ message: 'Failed to persist avatar metadata' });
+  }
+
+  if (previousStorageKey && previousStorageKey !== storageKey) {
+    try {
+      const previousDriveFileId = parseDriveFileId(previousStorageKey);
       if (previousDriveFileId) {
         const prevGoogleAccount = await prisma.oAuthAccount.findFirst({
           where: { userId: req.user!.id, provider: 'google', refreshToken: { not: null } }
@@ -298,20 +328,14 @@ authRouter.post('/me/avatar', requireAuth, uploadImage.single('image'), async (r
         if (prevGoogleAccount) {
           await deleteDriveFile(prevGoogleAccount, previousDriveFileId);
         }
-      } else if (isS3StorageKey(user.avatarStorageKey)) {
-        await deleteS3Object(user.avatarStorageKey);
+      } else if (isS3StorageKey(previousStorageKey)) {
+        await deleteS3Object(previousStorageKey);
       } else {
-        const prev = resolveStoredFilePath(user.avatarStorageKey);
+        const prev = resolveStoredFilePath(previousStorageKey);
         if (existsSync(prev)) await unlink(prev).catch(() => undefined);
       }
     } catch { /* non-fatal */ }
   }
-
-  const updated = await prisma.user.update({
-    where: { id: req.user!.id },
-    data: { avatarStorageKey: storageKey },
-    include: { oauthAccounts: { where: { provider: 'google' } } }
-  });
 
   res.json({ user: mapAuthUser(updated) });
 });
