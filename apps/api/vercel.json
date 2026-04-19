@@ -2,15 +2,10 @@
   "version": 2,
   "installCommand": "cd ../.. && npm install",
   "buildCommand": "npm run build",
-  "functions": {
-    "dist/server.js": {
-      "includeFiles": "dist/**,prisma/**"
-    }
-  },
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "/dist/server.js"
+      "dest": "/api/index"
     }
   ]
 }
