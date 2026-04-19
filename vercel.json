@@ -6,8 +6,12 @@
   "outputDirectory": "apps/web/dist",
   "rewrites": [
     {
+      "source": "/api",
+      "destination": "https://studioflow-api-pi.vercel.app/api"
+    },
+    {
       "source": "/api/(.*)",
-      "destination": "https://studioflowapi-production.up.railway.app/api/$1"
+      "destination": "https://studioflow-api-pi.vercel.app/api/$1"
     },
     {
       "source": "/(.*)",

@@ -1,6 +1,6 @@
 import type { DriveConnectionStatus } from '@studioflow/shared';
 import { useEffect, useState } from 'react';
-import { apiRequest } from '../lib/api';
+import { apiRequest, getGoogleAuthUrl } from '../lib/api';
 import './DriveSyncPage.css';
 
 export function DriveSyncPage() {
@@ -25,7 +25,7 @@ export function DriveSyncPage() {
         <div className="page-header__aside">
           <a
             className="btn btn-primary"
-            href={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api'}/auth/google`}
+            href={getGoogleAuthUrl()}
           >
             {status?.connected ? 'Reconnect Drive' : 'Link Google Drive'}
           </a>
