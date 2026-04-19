@@ -6,6 +6,38 @@ import { faCamera } from '@fortawesome/free-solid-svg-icons';
 import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
 import './DashboardPage.css';
 
+/** Resize + compress an image file to fit within maxDim px and target ~qualityMB MB. */
+async function compressImage(file: File, maxDim = 1200, quality = 0.82): Promise<File> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob || blob.size >= file.size) {
+            // Compression made it larger or failed — use the original
+            resolve(file);
+          } else {
+            resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+          }
+        },
+        'image/jpeg',
+        quality
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
 type ProjectSummaryWithAssetCount = ProjectSummary & { projectAssetCount: number };
 
 interface ProjectCardProps {
@@ -146,8 +178,9 @@ export function DashboardPage() {
   };
 
   const uploadCover = async (projectId: string, file: File) => {
+    const compressed = await compressImage(file);
     const fd = new FormData();
-    fd.append('image', file);
+    fd.append('image', compressed);
     setUploadingCoverId(projectId);
     try {
       const updated = await apiUploadWithProgress<ProjectDetails>(
