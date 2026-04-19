@@ -818,6 +818,27 @@
   margin-bottom: 10px;
 }
 
+.sidebar-panel__toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  margin-bottom: 10px;
+}
+
+.sidebar-panel__toggle[aria-expanded="true"] {
+  margin-bottom: 10px;
+}
+
+.sidebar-panel__toggle[aria-expanded="false"] {
+  margin-bottom: 0;
+}
+
 /* ── Video modal ── */
 .media-modal {
   position: fixed;

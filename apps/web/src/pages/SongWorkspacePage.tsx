@@ -123,12 +123,25 @@ export function SongWorkspacePage() {
   const [lyricsDraft, setLyricsDraft] = useState('');
   const [savingLyrics, setSavingLyrics] = useState(false);
 
-  // Collapsible asset sections
-  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  // Collapsible asset sections — everything except Song Audio starts collapsed
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
+    new Set(['Beat', 'Stems', 'Videos', 'Social Media Content', 'Shot List'])
+  );
   const toggleSection = (section: string) =>
     setCollapsedSections(prev => {
       const next = new Set(prev);
       if (next.has(section)) next.delete(section); else next.add(section);
+      return next;
+    });
+
+  // Collapsible sidebar panels — all start collapsed
+  const [collapsedPanels, setCollapsedPanels] = useState<Set<string>>(
+    new Set(['Song Notes', 'Tasks', 'Lyrics'])
+  );
+  const togglePanel = (panel: string) =>
+    setCollapsedPanels(prev => {
+      const next = new Set(prev);
+      if (next.has(panel)) next.delete(panel); else next.add(panel);
       return next;
     });
 
@@ -1448,103 +1461,145 @@ export function SongWorkspacePage() {
       <div className="sidebar">
 
         <div className="card sidebar-panel">
-          <p className="sidebar-panel__title">Song Notes</p>
-          <form className="form-stack" onSubmit={createNote}>
-            <textarea
-              className="textarea"
-              value={noteBody}
-              onChange={e => setNoteBody(e.target.value)}
-              placeholder="Creative notes, mix changes, direction..."
-              required
-            />
-            <button className="btn btn-ghost btn-sm" type="submit" style={{ alignSelf: 'flex-start' }}>Add note</button>
-          </form>
-          {song.notes.length > 0 && (
-            <ul className="note-list sidebar-note-list">
-              {song.notes.map(note => (
-                <li key={note.id} className="note-item">
-                  <div className="note-item__meta">
-                    <span className="note-item__author">{note.author}</span>
-                    <time className="note-item__time" dateTime={note.createdAt} title={fmtAbsolute(note.createdAt)}>
-                      {timeAgo(note.createdAt)}
-                    </time>
-                    <button
-                      className="btn btn-ghost btn-icon note-item__delete"
-                      type="button"
-                      onClick={() => deleteNote(note.id)}
-                      aria-label="Delete note"
-                      title="Delete note"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                        <path d="M2 3h8M5 3V2h2v1M3 3l.5 7h5L9 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    </button>
-                  </div>
-                  <p className="note-item__body">{note.body}</p>
-                </li>
-              ))}
-            </ul>
+          <button
+            className="sidebar-panel__title sidebar-panel__toggle"
+            type="button"
+            onClick={() => togglePanel('Song Notes')}
+            aria-expanded={!collapsedPanels.has('Song Notes')}
+          >
+            <svg className={`asset-section__chevron${collapsedPanels.has('Song Notes') ? ' asset-section__chevron--collapsed' : ''}`} width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+              <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Song Notes
+            {song.notes.length > 0 && <span className="asset-section__count">{song.notes.length}</span>}
+          </button>
+          {!collapsedPanels.has('Song Notes') && (
+            <>
+              <form className="form-stack" onSubmit={createNote}>
+                <textarea
+                  className="textarea"
+                  value={noteBody}
+                  onChange={e => setNoteBody(e.target.value)}
+                  placeholder="Creative notes, mix changes, direction..."
+                  required
+                />
+                <button className="btn btn-ghost btn-sm" type="submit" style={{ alignSelf: 'flex-start' }}>Add note</button>
+              </form>
+              {song.notes.length > 0 && (
+                <ul className="note-list sidebar-note-list">
+                  {song.notes.map(note => (
+                    <li key={note.id} className="note-item">
+                      <div className="note-item__meta">
+                        <span className="note-item__author">{note.author}</span>
+                        <time className="note-item__time" dateTime={note.createdAt} title={fmtAbsolute(note.createdAt)}>
+                          {timeAgo(note.createdAt)}
+                        </time>
+                        <button
+                          className="btn btn-ghost btn-icon note-item__delete"
+                          type="button"
+                          onClick={() => deleteNote(note.id)}
+                          aria-label="Delete note"
+                          title="Delete note"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M2 3h8M5 3V2h2v1M3 3l.5 7h5L9 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        </button>
+                      </div>
+                      <p className="note-item__body">{note.body}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
           )}
         </div>
 
         <div className="card sidebar-panel">
-          <p className="sidebar-panel__title">Tasks</p>
-          <form className="form-stack" onSubmit={createTask}>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input className="input" value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="New task" required />
-              <button className="btn btn-ghost btn-sm" type="submit" style={{ flexShrink: 0 }}>Add</button>
-            </div>
-          </form>
-          {song.tasks.length > 0 && (
-            <ul className="task-list">
-              {song.tasks.map(task => (
-                <li key={task.id} className={`task-item task-item--${task.status.toLowerCase().replace(' ', '-')}`}>
-                  <div className="task-item__row">
-                    <span className="task-item__title">{task.title}</span>
-                    <select
-                      className="select task-item__select"
-                      value={task.status}
-                      onChange={e => updateTaskStatus(task.id, e.target.value as SongTaskStatus)}
-                    >
-                      <option value="Open">Open</option>
-                      <option value="In Review">In Review</option>
-                      <option value="Done">Done</option>
-                    </select>
-                    <button
-                      className="btn btn-ghost btn-icon task-item__delete"
-                      type="button"
-                      onClick={() => deleteTask(task.id)}
-                      aria-label="Delete task"
-                      title="Delete task"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                        <path d="M2 3h8M5 3V2h2v1M3 3l.5 7h5L9 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    </button>
-                  </div>
-                  {task.assignee && <span className="task-item__assignee">{task.assignee}</span>}
-                </li>
-              ))}
-            </ul>
+          <button
+            className="sidebar-panel__title sidebar-panel__toggle"
+            type="button"
+            onClick={() => togglePanel('Tasks')}
+            aria-expanded={!collapsedPanels.has('Tasks')}
+          >
+            <svg className={`asset-section__chevron${collapsedPanels.has('Tasks') ? ' asset-section__chevron--collapsed' : ''}`} width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+              <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Tasks
+            {song.tasks.length > 0 && <span className="asset-section__count">{song.tasks.length}</span>}
+          </button>
+          {!collapsedPanels.has('Tasks') && (
+            <>
+              <form className="form-stack" onSubmit={createTask}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input className="input" value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="New task" required />
+                  <button className="btn btn-ghost btn-sm" type="submit" style={{ flexShrink: 0 }}>Add</button>
+                </div>
+              </form>
+              {song.tasks.length > 0 && (
+                <ul className="task-list">
+                  {song.tasks.map(task => (
+                    <li key={task.id} className={`task-item task-item--${task.status.toLowerCase().replace(' ', '-')}`}>
+                      <div className="task-item__row">
+                        <span className="task-item__title">{task.title}</span>
+                        <select
+                          className="select task-item__select"
+                          value={task.status}
+                          onChange={e => updateTaskStatus(task.id, e.target.value as SongTaskStatus)}
+                        >
+                          <option value="Open">Open</option>
+                          <option value="In Review">In Review</option>
+                          <option value="Done">Done</option>
+                        </select>
+                        <button
+                          className="btn btn-ghost btn-icon task-item__delete"
+                          type="button"
+                          onClick={() => deleteTask(task.id)}
+                          aria-label="Delete task"
+                          title="Delete task"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M2 3h8M5 3V2h2v1M3 3l.5 7h5L9 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        </button>
+                      </div>
+                      {task.assignee && <span className="task-item__assignee">{task.assignee}</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
           )}
         </div>
 
         <div className="card sidebar-panel lyrics-panel">
-          <div className="lyrics-panel__header">
-            <p className="sidebar-panel__title">Lyrics</p>
-            <button className="btn btn-primary btn-sm" type="button" onClick={saveLyrics} disabled={savingLyrics}>
-              {savingLyrics ? 'Saving...' : 'Save lyrics'}
-            </button>
-          </div>
-          <p className="lyrics-panel__hint">
-            Use section headers like Genius: [Intro], [Verse 1], [Pre-Chorus], [Chorus], [Bridge], [Outro].
-          </p>
-          <textarea
-            className="textarea lyrics-textarea"
-            value={lyricsDraft}
-            onChange={(e) => setLyricsDraft(e.target.value)}
-            placeholder={'[Verse 1]\nYour lyrics here...\n\n[Chorus]\nYour chorus here...'}
-          />
+          <button
+            className="sidebar-panel__title sidebar-panel__toggle"
+            type="button"
+            onClick={() => togglePanel('Lyrics')}
+            aria-expanded={!collapsedPanels.has('Lyrics')}
+          >
+            <svg className={`asset-section__chevron${collapsedPanels.has('Lyrics') ? ' asset-section__chevron--collapsed' : ''}`} width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+              <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Lyrics
+          </button>
+          {!collapsedPanels.has('Lyrics') && (
+            <>
+              <p className="lyrics-panel__hint">
+                Use section headers like Genius: [Intro], [Verse 1], [Pre-Chorus], [Chorus], [Bridge], [Outro].
+              </p>
+              <textarea
+                className="textarea lyrics-textarea"
+                value={lyricsDraft}
+                onChange={(e) => setLyricsDraft(e.target.value)}
+                placeholder={'[Verse 1]\nYour lyrics here...\n\n[Chorus]\nYour chorus here...'}
+              />
+              <button className="btn btn-primary btn-sm" type="button" onClick={saveLyrics} disabled={savingLyrics} style={{ alignSelf: 'flex-start' }}>
+                {savingLyrics ? 'Saving...' : 'Save lyrics'}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
