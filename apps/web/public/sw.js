@@ -12,7 +12,7 @@
  * Cache names are versioned. Bump CACHE_VER to force all clients to update.
  */
 
-const CACHE_VER = 'v5';
+const CACHE_VER = 'v6';
 const STATIC  = `sf-static-${CACHE_VER}`;   // immutable assets + fonts
 const DYNAMIC = `sf-dynamic-${CACHE_VER}`;  // SPA shell + misc same-origin
 const API     = `sf-api-${CACHE_VER}`;      // API responses (short-lived)
