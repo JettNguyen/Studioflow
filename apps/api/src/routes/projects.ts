@@ -464,6 +464,7 @@ projectRouter.get('/:projectId/cover', async (req, res) => {
   const project = await prisma.project.findUnique({ where: { id: paramToString(req.params.projectId) } });
   if (!project?.coverImageKey) return res.status(404).json({ message: 'No cover image' });
 
+  console.log('[cover] key=', project.coverImageKey, 's3Enabled=', env.s3Enabled);
   const driveFileId = parseDriveFileId(project.coverImageKey);
   if (driveFileId) {
     const accounts = await findDriveAccountsForProject(req.user!.id, project.id, project.createdById);
