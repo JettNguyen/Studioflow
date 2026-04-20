@@ -33,10 +33,10 @@
   transform: translateY(-1px);
 }
 
-/* Cover image — full-width banner at top of card (hidden on very small screens) */
+/* Cover image — square banner at top of card */
 .project-card__cover {
   width: 100%;
-  aspect-ratio: 16 / 7;
+  aspect-ratio: 1 / 1;
   overflow: hidden;
   background: #111;
   flex-shrink: 0;
@@ -191,7 +191,7 @@
   }
 
   .project-card__cover {
-    aspect-ratio: 16 / 6;
+    aspect-ratio: 1 / 1;
   }
 
   .project-card {

@@ -22,14 +22,6 @@ function ProjectCard({ project }: { project: ProjectSummaryWithAssetCount }) {
       <div className="project-card">
         <div className="project-card__top">
           <div className="project-card__top-left">
-            {project.coverImageUrl && (
-              <img
-                src={resolveApiUrl(project.coverImageUrl)}
-                alt=""
-                className="project-card__cover-thumb"
-                aria-hidden="true"
-              />
-            )}
             {project.genre && project.genre !== 'Unspecified' && (
               <span className="badge badge-accent">{project.genre}</span>
             )}
