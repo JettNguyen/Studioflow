@@ -961,7 +961,9 @@ export function ProjectPage() {
                   const selectedId = selectedVersionByGroup[groupKey] ?? versions[0].id;
                   const asset = versions.find(v => v.id === selectedId) ?? versions[0];
                   const mediaKind = asset.isLink ? 'other' : getMediaKind(asset.type);
-                  const previewable = mediaKind === 'audio' || mediaKind === 'video' || mediaKind === 'image';
+                  const gdocMatch = asset.isLink ? asset.downloadUrl.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/) : null;
+                  const gdocEmbedUrl = gdocMatch ? `https://docs.google.com/document/d/${gdocMatch[1]}/preview?embedded=true` : null;
+                  const previewable = mediaKind === 'audio' || mediaKind === 'video' || mediaKind === 'image' || Boolean(gdocEmbedUrl);
                   const isPreviewing = previewingAssetId === asset.id;
                   const assetSrc = resolveApiUrl(asset.downloadUrl);
                   return (
@@ -1171,6 +1173,14 @@ export function ProjectPage() {
                             className="misc-asset-preview__image"
                             src={assetSrc}
                             alt={asset.name}
+                          />
+                        )}
+                        {gdocEmbedUrl && (
+                          <iframe
+                            className="misc-asset-preview__gdoc"
+                            src={gdocEmbedUrl}
+                            title={asset.name}
+                            allowFullScreen
                           />
                         )}
                       </div>

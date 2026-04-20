@@ -606,6 +606,15 @@
   background: var(--surface);
 }
 
+.misc-asset-preview__gdoc {
+  width: 100%;
+  height: 480px;
+  border: none;
+  border-radius: var(--r-2);
+  display: block;
+  background: #fff;
+}
+
 /* Active state for the preview toggle button */
 .btn-ghost--active {
   color: var(--accent);
