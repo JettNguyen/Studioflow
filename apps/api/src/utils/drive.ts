@@ -345,6 +345,9 @@ export async function uploadDriveResumableChunk(
   mimeType: string
 ): Promise<{ complete: false } | { complete: true; fileId: string }> {
   const endByte = startByte + chunk.length - 1;
+  // Extract the exact ArrayBuffer slice backing this Buffer so that TypeScript's
+  // BodyInit constraint is satisfied and no extra bytes are included.
+  const chunkBody = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) as ArrayBuffer;
 
   const response = await fetch(sessionUri, {
     method: 'PUT',
@@ -353,7 +356,7 @@ export async function uploadDriveResumableChunk(
       'Content-Range': `bytes ${startByte}-${endByte}/${totalBytes}`,
       'Content-Type': mimeType,
     },
-    body: chunk,
+    body: chunkBody,
   });
 
   if (response.status === 200 || response.status === 201) {

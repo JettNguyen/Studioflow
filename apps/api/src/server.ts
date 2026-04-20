@@ -6,7 +6,7 @@ const app = createApp();
 // Named export for Vercel serverless handler.
 export default app;
 
-// Only start the HTTP server when running outside of Vercel (local dev / Railway).
+// Only start the HTTP server when running outside of Vercel (local dev).
 if (!process.env.VERCEL) {
   const host = '0.0.0.0';
   app.listen(env.port, host, () => {

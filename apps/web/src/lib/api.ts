@@ -104,8 +104,9 @@ function xhrPost<T>(url: string, formData: FormData, onProgress: (pct: number) =
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url);
     xhr.withCredentials = true;
+    onProgress(1); // show bar immediately before first progress event
     xhr.upload.addEventListener('progress', e => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      if (e.lengthComputable) onProgress(Math.max(2, Math.round((e.loaded / e.total) * 100)));
     });
     xhr.addEventListener('load', () => {
       if (xhr.status >= 200 && xhr.status < 300) {
