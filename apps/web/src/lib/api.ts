@@ -97,41 +97,67 @@ export function apiUploadWithProgress<T>(
   });
 }
 
-export function uploadDirectWithProgress<T>(
-  sessionUri: string,
-  file: File,
-  onProgress: (pct: number) => void
-): Promise<T> {
+const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk
+
+function xhrPost<T>(url: string, formData: FormData, onProgress: (pct: number) => void): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('PUT', sessionUri);
-    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-
-    onProgress(1);
-
+    xhr.open('POST', url);
+    xhr.withCredentials = true;
     xhr.upload.addEventListener('progress', e => {
-      if (e.lengthComputable) {
-        onProgress(Math.max(1, Math.round((e.loaded / e.total) * 100)));
-      } else {
-        onProgress(5);
-      }
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
     });
-
     xhr.addEventListener('load', () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        onProgress(100);
         try { resolve(JSON.parse(xhr.responseText) as T); }
-        catch { reject(new Error('Invalid response from Drive')); }
+        catch { reject(new Error('Invalid response')); }
       } else {
-        reject(new Error(`Direct upload failed with status ${xhr.status}`));
+        try {
+          const p = JSON.parse(xhr.responseText);
+          reject(new Error(p?.message || `Request failed: ${xhr.status}`));
+        } catch { reject(new Error(`Request failed: ${xhr.status}`)); }
       }
     });
-
-    xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
+    xhr.addEventListener('error', () => reject(new Error('Network error')));
     xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
-
-    xhr.send(file);
+    xhr.send(formData);
   });
+}
+
+export async function uploadChunkedWithProgress<T>(
+  path: string,
+  file: File,
+  extraFields: Record<string, string>,
+  onProgress: (pct: number) => void
+): Promise<T> {
+  const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+  let driveSessionUri = '';
+
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const chunk = file.slice(start, start + CHUNK_SIZE);
+
+    const fd = new FormData();
+    fd.append('file', chunk, file.name);
+    fd.append('chunkIndex', String(i));
+    fd.append('totalChunks', String(totalChunks));
+    fd.append('totalSizeBytes', String(file.size));
+    if (driveSessionUri) fd.append('driveSessionUri', driveSessionUri);
+    for (const [k, v] of Object.entries(extraFields)) fd.append(k, v);
+
+    const data = await xhrPost<Record<string, unknown>>(
+      `${uploadBaseUrl}${path}`, fd,
+      pct => onProgress(Math.max(1, Math.round(((i + pct / 100) / totalChunks) * 100)))
+    );
+
+    if (i === totalChunks - 1) {
+      onProgress(100);
+      return data as T;
+    }
+    driveSessionUri = data.driveSessionUri as string;
+  }
+
+  throw new Error('Chunked upload completed without receiving the final asset.');
 }
 
 export function resolveApiUrl(path: string) {

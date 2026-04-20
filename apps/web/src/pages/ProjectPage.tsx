@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } 
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPencil, faCheck, faXmark, faTrash } from '@fortawesome/free-solid-svg-icons';
-import { apiRequest, apiUploadWithProgress, uploadDirectWithProgress, resolveApiUrl } from '../lib/api';
+import { apiRequest, uploadChunkedWithProgress, resolveApiUrl } from '../lib/api';
 import { useDropZone } from '../context/DropZoneContext';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -393,31 +393,13 @@ export function ProjectPage() {
       const added: ProjectAsset[] = [];
       for (let i = 0; i < miscSelectedFiles.length; i++) {
         const file = miscSelectedFiles[i];
-        const assetName = (miscSelectedFiles.length === 1 && miscAssetName.trim()) ? miscAssetName.trim() : file.name;
-        const progressBase = (pct: number) =>
-          setMiscUploadProgress(Math.round(((i + pct / 100) / miscSelectedFiles.length) * 100));
-
-        let newAsset: ProjectAsset;
-        try {
-          const { sessionUri } = await apiRequest<{ sessionUri: string }>(
-            `/projects/${projectId}/assets/initiate-drive-upload`,
-            { method: 'POST', body: { name: assetName, mimeType: file.type || 'application/octet-stream', category: miscAssetCategory, fileSizeBytes: file.size } }
-          );
-          const driveFile = await uploadDirectWithProgress<{ id: string }>(sessionUri, file, progressBase);
-          newAsset = await apiRequest<ProjectAsset>(
-            `/projects/${projectId}/assets/confirm-drive-upload`,
-            { method: 'POST', body: { driveFileId: driveFile.id, name: assetName, mimeType: file.type || 'application/octet-stream', category: miscAssetCategory, fileSizeBytes: String(file.size) } }
-          );
-        } catch {
-          // Fallback to the server-proxied upload (works for small files)
-          const fd = new FormData();
-          fd.append('file', file);
-          fd.append('category', miscAssetCategory);
-          if (miscSelectedFiles.length === 1 && miscAssetName.trim()) fd.append('name', miscAssetName.trim());
-          newAsset = await apiUploadWithProgress<ProjectAsset>(
-            `/projects/${projectId}/assets`, fd, progressBase
-          );
-        }
+        const name = (miscSelectedFiles.length === 1 && miscAssetName.trim()) ? miscAssetName.trim() : file.name;
+        const newAsset = await uploadChunkedWithProgress<ProjectAsset>(
+          `/projects/${projectId}/assets/upload-chunk`,
+          file,
+          { name, mimeType: file.type || 'application/octet-stream', category: miscAssetCategory },
+          pct => setMiscUploadProgress(Math.round(((i + pct / 100) / miscSelectedFiles.length) * 100))
+        );
         added.push(newAsset);
       }
       setMiscAssets(prev => [...added.reverse(), ...prev]);

@@ -337,6 +337,38 @@ export async function initiateDriveResumableUpload(
   return sessionUri;
 }
 
+export async function uploadDriveResumableChunk(
+  sessionUri: string,
+  chunk: Buffer,
+  startByte: number,
+  totalBytes: number,
+  mimeType: string
+): Promise<{ complete: false } | { complete: true; fileId: string }> {
+  const endByte = startByte + chunk.length - 1;
+
+  const response = await fetch(sessionUri, {
+    method: 'PUT',
+    headers: {
+      'Content-Length': String(chunk.length),
+      'Content-Range': `bytes ${startByte}-${endByte}/${totalBytes}`,
+      'Content-Type': mimeType,
+    },
+    body: chunk,
+  });
+
+  if (response.status === 200 || response.status === 201) {
+    const data = await response.json() as { id: string };
+    return { complete: true, fileId: data.id };
+  }
+
+  if (response.status === 308) {
+    return { complete: false };
+  }
+
+  const body = await response.text();
+  throw new Error(`Drive chunk upload failed (${response.status}): ${body}`);
+}
+
 export async function deleteDriveFile(account: OAuthAccount, driveFileId: string) {
   const oauthClient = getAuthorizedClient(account);
   const drive = google.drive({ version: 'v3', auth: oauthClient });

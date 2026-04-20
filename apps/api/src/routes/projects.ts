@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { createReadStream, existsSync, statSync } from 'node:fs';
-import { unlink } from 'node:fs/promises';
+import { readFile, unlink } from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import type { CreateProjectRequest } from '@studioflow/shared';
@@ -25,8 +25,11 @@ import {
   getDriveFileStream,
   initiateDriveResumableUpload,
   setDriveFilePublicRead,
-  uploadDriveFile
+  uploadDriveFile,
+  uploadDriveResumableChunk
 } from '../utils/drive.js';
+
+const CHUNK_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB — keeps each request well under Vercel's 4.5 MB body limit
 import { mapProjectAsset, mapProjectDetails, mapProjectSummary } from '../utils/mappers.js';
 
 type RawProjectAsset = {
@@ -765,120 +768,139 @@ projectRouter.post('/:projectId/assets/link', async (req, res) => {
   res.status(201).json(mapProjectAsset({ ...created, notes: [] }));
 });
 
-// Initiate a direct browser-to-Drive resumable upload session.
-// Returns a Drive session URI the client can PUT the file to directly,
-// avoiding Vercel's 4.5 MB body limit.
-projectRouter.post('/:projectId/assets/initiate-drive-upload', async (req, res) => {
+// Chunked upload route: client splits the file into CHUNK_SIZE_BYTES pieces and sends
+// them one at a time. The server forwards each chunk to a Drive resumable upload session,
+// keeping every request body well under Vercel's 4.5 MB limit. On the final chunk the
+// server creates the ProjectAsset DB record and returns it.
+projectRouter.post('/:projectId/assets/upload-chunk', upload.single('file'), async (req, res) => {
   const membership = await prisma.projectMembership.findFirst({
     where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
   });
   if (!membership) return res.status(404).json({ message: 'Project not found' });
-
-  const { name, mimeType, category } = req.body as Record<string, string>;
-  if (!name?.trim() || !mimeType?.trim()) {
-    return res.status(400).json({ message: 'name and mimeType are required' });
-  }
+  if (!req.file) return res.status(400).json({ message: 'No chunk provided' });
 
   const projectId = paramToString(req.params.projectId);
-  const safeCategory = sanitizeCategory(category);
+  const chunkIndex    = parseInt(req.body.chunkIndex    ?? '0', 10);
+  const totalChunks   = parseInt(req.body.totalChunks   ?? '1', 10);
+  const totalSizeBytes = parseInt(req.body.totalSizeBytes ?? '0', 10);
+  const assetName  = typeof req.body.name     === 'string' ? req.body.name.trim()     : req.file.originalname;
+  const mimeType   = typeof req.body.mimeType === 'string' ? req.body.mimeType.trim() : req.file.mimetype;
+  const category   = sanitizeCategory(req.body.category);
+  const incomingSessionUri = typeof req.body.driveSessionUri === 'string' ? req.body.driveSessionUri.trim() : null;
 
-  const uploadProject = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { driveFolderId: true, createdById: true, title: true }
-  });
-  if (!uploadProject) return res.status(404).json({ message: 'Project not found' });
+  const localChunkPath = resolveStoredFilePath(req.file.filename);
 
-  const driveAccounts = await findDriveAccountsForProject(req.user!.id, projectId, uploadProject.createdById);
-  if (!driveAccounts.length) {
-    return res.status(503).json({ message: 'No Google Drive account is linked. Connect Google Drive and retry.' });
-  }
+  try {
+    let driveSessionUri = incomingSessionUri;
 
-  let projectDriveFolderId = uploadProject.driveFolderId ?? null;
-  if (!projectDriveFolderId) {
-    for (const account of driveAccounts) {
-      try {
-        projectDriveFolderId = await ensureStudioflowProjectFolder(account, uploadProject.title);
-        if (projectDriveFolderId) {
-          await prisma.project.update({ where: { id: projectId }, data: { driveFolderId: projectDriveFolderId, driveSyncStatus: 'Healthy' } });
-          break;
-        }
-      } catch { /* try next */ }
-    }
-  }
-  if (!projectDriveFolderId) {
-    return res.status(502).json({ message: 'Could not locate or create the project Drive folder.' });
-  }
-
-  for (const account of driveAccounts) {
-    try {
-      const projectFilesFolderId = await ensureProjectFilesFolder(account, projectDriveFolderId);
-      if (!projectFilesFolderId) continue;
-      const targetFolderId = await ensureProjectFilesCategoryFolder(account, safeCategory, projectFilesFolderId);
-      const sessionUri = await initiateDriveResumableUpload(account, {
-        name: name.trim(),
-        mimeType: mimeType.trim(),
-        parentFolderId: targetFolderId
+    // First chunk: locate Drive folders and initiate a resumable upload session.
+    if (!driveSessionUri) {
+      const uploadProject = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { driveFolderId: true, createdById: true, title: true }
       });
-      return res.json({ sessionUri });
-    } catch { /* try next */ }
+      if (!uploadProject) {
+        await unlink(localChunkPath).catch(() => undefined);
+        return res.status(404).json({ message: 'Project not found' });
+      }
+
+      const driveAccounts = await findDriveAccountsForProject(req.user!.id, projectId, uploadProject.createdById);
+      if (!driveAccounts.length) {
+        await unlink(localChunkPath).catch(() => undefined);
+        return res.status(503).json({ message: 'No Google Drive account is linked. Connect Google Drive and retry.' });
+      }
+
+      let projectDriveFolderId = uploadProject.driveFolderId ?? null;
+      if (!projectDriveFolderId) {
+        for (const account of driveAccounts) {
+          try {
+            projectDriveFolderId = await ensureStudioflowProjectFolder(account, uploadProject.title);
+            if (projectDriveFolderId) {
+              await prisma.project.update({ where: { id: projectId }, data: { driveFolderId: projectDriveFolderId, driveSyncStatus: 'Healthy' } });
+              break;
+            }
+          } catch { /* try next */ }
+        }
+      }
+      if (!projectDriveFolderId) {
+        await unlink(localChunkPath).catch(() => undefined);
+        return res.status(502).json({ message: 'Could not locate or create the project Drive folder.' });
+      }
+
+      let sessionUri: string | null = null;
+      for (const account of driveAccounts) {
+        try {
+          const projectFilesFolderId = await ensureProjectFilesFolder(account, projectDriveFolderId);
+          if (!projectFilesFolderId) continue;
+          const targetFolderId = await ensureProjectFilesCategoryFolder(account, category, projectFilesFolderId);
+          sessionUri = await initiateDriveResumableUpload(account, { name: assetName, mimeType, parentFolderId: targetFolderId });
+          if (sessionUri) break;
+        } catch { /* try next */ }
+      }
+
+      if (!sessionUri) {
+        await unlink(localChunkPath).catch(() => undefined);
+        return res.status(502).json({ message: 'Failed to initiate Google Drive upload session.' });
+      }
+      driveSessionUri = sessionUri;
+    }
+
+    const chunkBuffer = await readFile(localChunkPath);
+    await unlink(localChunkPath).catch(() => undefined);
+
+    const startByte  = chunkIndex * CHUNK_SIZE_BYTES;
+    const isLastChunk = chunkIndex === totalChunks - 1;
+
+    const result = await uploadDriveResumableChunk(driveSessionUri, chunkBuffer, startByte, totalSizeBytes, mimeType);
+
+    if (result.complete) {
+      const fileId = result.fileId;
+
+      const uploadProject2 = await prisma.project.findUnique({ where: { id: projectId }, select: { createdById: true } });
+      const driveAccounts2 = uploadProject2
+        ? await findDriveAccountsForProject(req.user!.id, projectId, uploadProject2.createdById)
+        : [];
+      for (const account of driveAccounts2) {
+        try { await setDriveFilePublicRead(account, fileId); break; } catch { /* non-fatal */ }
+      }
+
+      const versionGroup = slugifyVersionGroup(assetName);
+      const [prevVersion] = await prisma.$queryRaw<{ versionNumber: number }[]>`
+        SELECT "versionNumber" FROM "ProjectAsset"
+        WHERE "projectId" = ${projectId} AND "versionGroup" = ${versionGroup}
+        ORDER BY "versionNumber" DESC LIMIT 1
+      `;
+      const versionNumber = prevVersion ? prevVersion.versionNumber + 1 : 1;
+      const id = crypto.randomUUID();
+      const now = new Date();
+
+      await prisma.$executeRaw`
+        INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt")
+        VALUES (${id}, ${projectId}, ${assetName}, ${mimeType}, ${category}, ${versionGroup}, ${versionNumber}, ${totalSizeBytes || null}, ${null}, ${fileId}, ${now}, ${now})
+      `;
+
+      const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
+        SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt"
+        FROM "ProjectAsset" WHERE id = ${id}
+      `;
+
+      return res.status(201).json(mapProjectAsset({ ...created, notes: [] }));
+    }
+
+    // Intermediate chunk accepted by Drive — pass the session URI back so the
+    // client can include it in the next request.
+    if (!isLastChunk) {
+      return res.json({ driveSessionUri });
+    }
+
+    // Shouldn't happen: last chunk but Drive didn't return 200/201.
+    return res.status(502).json({ message: 'Drive did not confirm upload completion on the final chunk.' });
+
+  } catch (err) {
+    await unlink(localChunkPath).catch(() => undefined);
+    console.error('[upload-chunk error]', err);
+    return res.status(500).json({ message: 'Failed to upload chunk to Google Drive.' });
   }
-
-  return res.status(502).json({ message: 'Failed to initiate Google Drive upload session.' });
-});
-
-// Confirm a direct Drive upload: set permissions and create the DB record.
-projectRouter.post('/:projectId/assets/confirm-drive-upload', async (req, res) => {
-  const membership = await prisma.projectMembership.findFirst({
-    where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
-  });
-  if (!membership) return res.status(404).json({ message: 'Project not found' });
-
-  const { driveFileId, name, mimeType, category, fileSizeBytes } = req.body as Record<string, string>;
-  if (!driveFileId?.trim() || !name?.trim()) {
-    return res.status(400).json({ message: 'driveFileId and name are required' });
-  }
-
-  const projectId = paramToString(req.params.projectId);
-  const safeCategory = sanitizeCategory(category);
-  const assetName = name.trim();
-  const versionGroup = slugifyVersionGroup(assetName);
-
-  const [prevVersion] = await prisma.$queryRaw<{ versionNumber: number }[]>`
-    SELECT "versionNumber" FROM "ProjectAsset"
-    WHERE "projectId" = ${projectId} AND "versionGroup" = ${versionGroup}
-    ORDER BY "versionNumber" DESC LIMIT 1
-  `;
-  const versionNumber = prevVersion ? prevVersion.versionNumber + 1 : 1;
-
-  const uploadProject = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { createdById: true }
-  });
-  if (!uploadProject) return res.status(404).json({ message: 'Project not found' });
-
-  const driveAccounts = await findDriveAccountsForProject(req.user!.id, projectId, uploadProject.createdById);
-  for (const account of driveAccounts) {
-    try {
-      await setDriveFilePublicRead(account, driveFileId.trim());
-      break;
-    } catch { /* non-fatal */ }
-  }
-
-  const sizeBytes = fileSizeBytes ? parseInt(fileSizeBytes, 10) : null;
-  const id = crypto.randomUUID();
-  const now = new Date();
-
-  await prisma.$executeRaw`
-    INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt")
-    VALUES (${id}, ${projectId}, ${assetName}, ${mimeType?.trim() || 'application/octet-stream'}, ${safeCategory}, ${versionGroup}, ${versionNumber}, ${sizeBytes}, ${null}, ${driveFileId.trim()}, ${now}, ${now})
-  `;
-
-  const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
-    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt"
-    FROM "ProjectAsset" WHERE id = ${id}
-  `;
-
-  res.status(201).json(mapProjectAsset({ ...created, notes: [] }));
 });
 
 // Upload a project misc asset
