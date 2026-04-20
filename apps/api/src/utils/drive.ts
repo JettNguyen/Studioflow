@@ -303,6 +303,40 @@ export async function uploadDriveFile(
   return fileId;
 }
 
+export async function initiateDriveResumableUpload(
+  account: OAuthAccount,
+  input: { name: string; mimeType: string; parentFolderId?: string | null }
+): Promise<string> {
+  const oauthClient = getAuthorizedClient(account);
+  const { token } = await oauthClient.getAccessToken();
+  if (!token) throw new Error('Could not obtain access token for Drive upload');
+
+  const metadata: Record<string, unknown> = { name: input.name };
+  if (input.parentFolderId) metadata.parents = [input.parentFolderId];
+
+  const response = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': input.mimeType,
+      },
+      body: JSON.stringify(metadata),
+    }
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Drive resumable initiation failed (${response.status}): ${body}`);
+  }
+
+  const sessionUri = response.headers.get('location');
+  if (!sessionUri) throw new Error('Drive API did not return a session URI');
+  return sessionUri;
+}
+
 export async function deleteDriveFile(account: OAuthAccount, driveFileId: string) {
   const oauthClient = getAuthorizedClient(account);
   const drive = google.drive({ version: 'v3', auth: oauthClient });

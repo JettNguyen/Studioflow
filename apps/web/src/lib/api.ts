@@ -97,6 +97,43 @@ export function apiUploadWithProgress<T>(
   });
 }
 
+export function uploadDirectWithProgress<T>(
+  sessionUri: string,
+  file: File,
+  onProgress: (pct: number) => void
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', sessionUri);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+
+    onProgress(1);
+
+    xhr.upload.addEventListener('progress', e => {
+      if (e.lengthComputable) {
+        onProgress(Math.max(1, Math.round((e.loaded / e.total) * 100)));
+      } else {
+        onProgress(5);
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress(100);
+        try { resolve(JSON.parse(xhr.responseText) as T); }
+        catch { reject(new Error('Invalid response from Drive')); }
+      } else {
+        reject(new Error(`Direct upload failed with status ${xhr.status}`));
+      }
+    });
+
+    xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
+    xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+
+    xhr.send(file);
+  });
+}
+
 export function resolveApiUrl(path: string) {
   if (/^https?:\/\//i.test(path)) {
     return path;

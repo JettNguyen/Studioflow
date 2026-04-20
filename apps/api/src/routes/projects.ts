@@ -23,6 +23,8 @@ import {
   ensureProjectFilesFolder,
   ensureProjectFilesCategoryFolder,
   getDriveFileStream,
+  initiateDriveResumableUpload,
+  setDriveFilePublicRead,
   uploadDriveFile
 } from '../utils/drive.js';
 import { mapProjectAsset, mapProjectDetails, mapProjectSummary } from '../utils/mappers.js';
@@ -757,6 +759,122 @@ projectRouter.post('/:projectId/assets/link', async (req, res) => {
 
   const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
     SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "createdAt", "updatedAt"
+    FROM "ProjectAsset" WHERE id = ${id}
+  `;
+
+  res.status(201).json(mapProjectAsset({ ...created, notes: [] }));
+});
+
+// Initiate a direct browser-to-Drive resumable upload session.
+// Returns a Drive session URI the client can PUT the file to directly,
+// avoiding Vercel's 4.5 MB body limit.
+projectRouter.post('/:projectId/assets/initiate-drive-upload', async (req, res) => {
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  const { name, mimeType, category } = req.body as Record<string, string>;
+  if (!name?.trim() || !mimeType?.trim()) {
+    return res.status(400).json({ message: 'name and mimeType are required' });
+  }
+
+  const projectId = paramToString(req.params.projectId);
+  const safeCategory = sanitizeCategory(category);
+
+  const uploadProject = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { driveFolderId: true, createdById: true, title: true }
+  });
+  if (!uploadProject) return res.status(404).json({ message: 'Project not found' });
+
+  const driveAccounts = await findDriveAccountsForProject(req.user!.id, projectId, uploadProject.createdById);
+  if (!driveAccounts.length) {
+    return res.status(503).json({ message: 'No Google Drive account is linked. Connect Google Drive and retry.' });
+  }
+
+  let projectDriveFolderId = uploadProject.driveFolderId ?? null;
+  if (!projectDriveFolderId) {
+    for (const account of driveAccounts) {
+      try {
+        projectDriveFolderId = await ensureStudioflowProjectFolder(account, uploadProject.title);
+        if (projectDriveFolderId) {
+          await prisma.project.update({ where: { id: projectId }, data: { driveFolderId: projectDriveFolderId, driveSyncStatus: 'Healthy' } });
+          break;
+        }
+      } catch { /* try next */ }
+    }
+  }
+  if (!projectDriveFolderId) {
+    return res.status(502).json({ message: 'Could not locate or create the project Drive folder.' });
+  }
+
+  for (const account of driveAccounts) {
+    try {
+      const projectFilesFolderId = await ensureProjectFilesFolder(account, projectDriveFolderId);
+      if (!projectFilesFolderId) continue;
+      const targetFolderId = await ensureProjectFilesCategoryFolder(account, safeCategory, projectFilesFolderId);
+      const sessionUri = await initiateDriveResumableUpload(account, {
+        name: name.trim(),
+        mimeType: mimeType.trim(),
+        parentFolderId: targetFolderId
+      });
+      return res.json({ sessionUri });
+    } catch { /* try next */ }
+  }
+
+  return res.status(502).json({ message: 'Failed to initiate Google Drive upload session.' });
+});
+
+// Confirm a direct Drive upload: set permissions and create the DB record.
+projectRouter.post('/:projectId/assets/confirm-drive-upload', async (req, res) => {
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  const { driveFileId, name, mimeType, category, fileSizeBytes } = req.body as Record<string, string>;
+  if (!driveFileId?.trim() || !name?.trim()) {
+    return res.status(400).json({ message: 'driveFileId and name are required' });
+  }
+
+  const projectId = paramToString(req.params.projectId);
+  const safeCategory = sanitizeCategory(category);
+  const assetName = name.trim();
+  const versionGroup = slugifyVersionGroup(assetName);
+
+  const [prevVersion] = await prisma.$queryRaw<{ versionNumber: number }[]>`
+    SELECT "versionNumber" FROM "ProjectAsset"
+    WHERE "projectId" = ${projectId} AND "versionGroup" = ${versionGroup}
+    ORDER BY "versionNumber" DESC LIMIT 1
+  `;
+  const versionNumber = prevVersion ? prevVersion.versionNumber + 1 : 1;
+
+  const uploadProject = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { createdById: true }
+  });
+  if (!uploadProject) return res.status(404).json({ message: 'Project not found' });
+
+  const driveAccounts = await findDriveAccountsForProject(req.user!.id, projectId, uploadProject.createdById);
+  for (const account of driveAccounts) {
+    try {
+      await setDriveFilePublicRead(account, driveFileId.trim());
+      break;
+    } catch { /* non-fatal */ }
+  }
+
+  const sizeBytes = fileSizeBytes ? parseInt(fileSizeBytes, 10) : null;
+  const id = crypto.randomUUID();
+  const now = new Date();
+
+  await prisma.$executeRaw`
+    INSERT INTO "ProjectAsset" (id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt")
+    VALUES (${id}, ${projectId}, ${assetName}, ${mimeType?.trim() || 'application/octet-stream'}, ${safeCategory}, ${versionGroup}, ${versionNumber}, ${sizeBytes}, ${null}, ${driveFileId.trim()}, ${now}, ${now})
+  `;
+
+  const [created] = await prisma.$queryRaw<RawProjectAsset[]>`
+    SELECT id, "projectId", name, type, category, "versionGroup", "versionNumber", "fileSizeBytes", "storageKey", "driveFileId", "createdAt", "updatedAt"
     FROM "ProjectAsset" WHERE id = ${id}
   `;
 
