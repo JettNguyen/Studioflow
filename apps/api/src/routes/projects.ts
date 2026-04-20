@@ -1035,9 +1035,9 @@ projectRouter.get('/:projectId/assets/:assetId/download', async (req, res) => {
       AND "projectId" = ${paramToString(req.params.projectId)}
   `;
 
-  if (!asset || !asset.storageKey) return res.status(404).json({ message: 'Asset not found' });
+  if (!asset) return res.status(404).json({ message: 'Asset not found' });
 
-  if (asset.storageKey.startsWith('link:')) {
+  if (asset.storageKey?.startsWith('link:')) {
     return res.redirect(asset.storageKey.slice(5));
   }
 
@@ -1045,7 +1045,7 @@ projectRouter.get('/:projectId/assets/:assetId/download', async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${encodedName}"; filename*=UTF-8''${encodedName}`);
   res.setHeader('Cache-Control', 'private, max-age=3600');
 
-  if (isS3StorageKey(asset.storageKey) || env.s3Enabled) {
+  if (asset.storageKey && (isS3StorageKey(asset.storageKey) || env.s3Enabled)) {
     try {
       const { object } = await getS3ObjectWithRangeLegacyFallback(asset.storageKey, undefined);
       res.setHeader('Content-Type', object.ContentType || asset.type || 'application/octet-stream');
@@ -1087,7 +1087,7 @@ projectRouter.get('/:projectId/assets/:assetId/download', async (req, res) => {
     }
   }
 
-  if (!asset.storageKey) return res.status(404).json({ message: 'File not found' });
+  if (!asset.storageKey) return res.status(404).json({ message: 'File not found in any storage location' });
   const fullPath = resolveStoredFilePath(asset.storageKey);
   if (!existsSync(fullPath)) return res.status(404).json({ message: 'File not found' });
 
