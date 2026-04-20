@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { unlink } from 'node:fs/promises';
+import { readFile, unlink } from 'node:fs/promises';
 import { parseFile as parseAudioFileMetadata } from 'music-metadata';
 import { z } from 'zod';
 import type {
@@ -13,7 +13,16 @@ import { env } from '../config.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { resolveStoredFilePath, upload } from '../storage/localStorage.js';
 import { buildS3ObjectKey, deleteS3Object, uploadFileToS3 } from '../storage/s3Storage.js';
-import { createDriveFolder, ensureSongCategoryFolder, uploadDriveFile } from '../utils/drive.js';
+import {
+  createDriveFolder,
+  ensureSongCategoryFolder,
+  initiateDriveResumableUpload,
+  setDriveFilePublicRead,
+  uploadDriveFile,
+  uploadDriveResumableChunk
+} from '../utils/drive.js';
+
+const CHUNK_SIZE_BYTES = 2 * 1024 * 1024;
 import { mapSongWorkspace } from '../utils/mappers.js';
 
 export const songRouter = Router();
@@ -533,6 +542,137 @@ songRouter.patch('/:songId/tasks/:taskId', async (req, res) => {
     assignee: updatedTask.assignee?.name ?? null,
     status: updatedTask.status === 'InReview' ? 'In Review' : updatedTask.status
   });
+});
+
+songRouter.post('/:songId/assets/upload-chunk', upload.single('file'), async (req, res) => {
+  const songId = paramToString(req.params.songId);
+  if (!req.file) return res.status(400).json({ message: 'No chunk provided' });
+
+  const chunkIndex     = parseInt(req.body.chunkIndex    ?? '0', 10);
+  const totalChunks    = parseInt(req.body.totalChunks   ?? '1', 10);
+  const totalSizeBytes = parseInt(req.body.totalSizeBytes ?? '0', 10);
+  const mimeType       = typeof req.body.mimeType === 'string' ? req.body.mimeType.trim() : req.file.mimetype;
+  const incomingSessionUri = typeof req.body.driveSessionUri === 'string' ? req.body.driveSessionUri.trim() : null;
+  const localChunkPath = resolveStoredFilePath(req.file.filename);
+
+  const song = await prisma.song.findFirst({
+    where: { id: songId, project: { memberships: { some: { userId: req.user!.id } } } },
+    include: { project: { select: { createdById: true } } }
+  });
+  if (!song) {
+    await unlink(localChunkPath).catch(() => undefined);
+    return res.status(404).json({ message: 'Song not found' });
+  }
+
+  try {
+    let driveSessionUri = incomingSessionUri;
+
+    if (!driveSessionUri) {
+      if (!song.driveFolderId) {
+        await unlink(localChunkPath).catch(() => undefined);
+        return res.status(503).json({ message: 'This song is not linked to Google Drive. Open the song settings and connect Google Drive first.' });
+      }
+
+      const driveAccounts = await findDriveUploadAccountsForSong(req.user!.id, song.projectId, song.project.createdById);
+      if (!driveAccounts.length) {
+        await unlink(localChunkPath).catch(() => undefined);
+        return res.status(503).json({ message: 'No Google Drive account is linked.' });
+      }
+
+      const category = typeof req.body.category === 'string' ? req.body.category : 'Song Audio';
+      const userProvidedName = (req.body.name as string | undefined)?.trim() || '';
+      const assetDisplayName = userProvidedName || (category === 'Song Audio' ? song.title : req.file.originalname);
+
+      let sessionUri: string | null = null;
+      for (const account of driveAccounts) {
+        try {
+          const categoryFolderId = await ensureSongCategoryFolder(account, category, song.driveFolderId);
+          sessionUri = await initiateDriveResumableUpload(account, { name: assetDisplayName, mimeType, parentFolderId: categoryFolderId });
+          if (sessionUri) break;
+        } catch { /* try next */ }
+      }
+      if (!sessionUri) {
+        await unlink(localChunkPath).catch(() => undefined);
+        return res.status(502).json({ message: 'Failed to initiate Google Drive upload session.' });
+      }
+      driveSessionUri = sessionUri;
+    }
+
+    const chunkBuffer = await readFile(localChunkPath);
+    await unlink(localChunkPath).catch(() => undefined);
+    const startByte = chunkIndex * CHUNK_SIZE_BYTES;
+    const isLastChunk = chunkIndex === totalChunks - 1;
+
+    const result = await uploadDriveResumableChunk(driveSessionUri, chunkBuffer, startByte, totalSizeBytes, mimeType);
+
+    if (result.complete) {
+      const fileId = result.fileId;
+      const driveAccounts2 = await findDriveUploadAccountsForSong(req.user!.id, song.projectId, song.project.createdById);
+      for (const account of driveAccounts2) {
+        try { await setDriveFilePublicRead(account, fileId); break; } catch { /* non-fatal */ }
+      }
+
+      const parsedMeta = uploadAssetMetadataSchema.safeParse({ category: req.body.category, versionGroup: req.body.versionGroup });
+      const category = parsedMeta.success ? parsedMeta.data.category : 'Song Audio';
+      const prismaCategory = toPrismaAssetCategory(category);
+      const userProvidedName = (req.body.name as string | undefined)?.trim() || '';
+      const inputAssetName = userProvidedName || (category === 'Song Audio' ? song.title : req.file?.originalname ?? 'upload');
+      const vgRaw = parsedMeta.success ? parsedMeta.data.versionGroup : undefined;
+      const versionGroup = slugifyVersionGroup(vgRaw || inputAssetName);
+
+      const previousVersion = await prisma.asset.findFirst({ where: { songId, versionGroup }, orderBy: { versionNumber: 'desc' } });
+      const nextVersionNumber = previousVersion ? previousVersion.versionNumber + 1 : 1;
+
+      const clientDuration = (req.body.duration as string | undefined)?.trim() || null;
+      const clientKey      = (req.body.detectedKey as string | undefined)?.trim() || null;
+      const clientBpm      = (() => { const v = parseInt((req.body.detectedBpm as string | undefined) ?? '', 10); return Number.isFinite(v) && v > 0 ? v : null; })();
+
+      const asset = await prisma.asset.create({
+        data: {
+          songId,
+          name: inputAssetName,
+          type: mimeType,
+          category: prismaCategory,
+          versionGroup,
+          versionNumber: nextVersionNumber,
+          duration: clientDuration,
+          fileSizeBytes: totalSizeBytes || null,
+          storageKey: null,
+          driveFileId: fileId
+        }
+      });
+
+      if (prismaCategory === 'SongAudio' && (clientKey || clientBpm)) {
+        const flags = await prisma.$queryRawUnsafe<Array<{ keyManuallySet: boolean; bpmManuallySet: boolean }>>(
+          `SELECT "keyManuallySet", "bpmManuallySet" FROM "Song" WHERE "id" = $1`, songId
+        );
+        const keyManuallySet = flags[0]?.keyManuallySet ?? false;
+        const bpmManuallySet = flags[0]?.bpmManuallySet ?? false;
+        const cols: string[] = [];
+        if (clientKey && !keyManuallySet) cols.push(`"keySignature" = '${clientKey.replace(/'/g, "''")}'`);
+        if (clientBpm && !bpmManuallySet) cols.push(`"bpm" = ${clientBpm}`);
+        if (cols.length > 0) await prisma.$executeRawUnsafe(`UPDATE "Song" SET ${cols.join(', ')} WHERE "id" = '${songId}'`);
+      }
+
+      const mediaKind = mimeType.startsWith('video/') ? 'video' : mimeType.startsWith('audio/') ? 'audio' : 'other';
+      return res.status(201).json({
+        id: asset.id, name: asset.name, type: asset.type, category,
+        versionGroup: asset.versionGroup, versionNumber: asset.versionNumber,
+        duration: asset.duration, sampleRateHz: null, bitrateKbps: null, codec: null,
+        channels: null, fileSizeBytes: asset.fileSizeBytes, container: null,
+        mediaKind, streamUrl: `/api/assets/${asset.id}/stream`, downloadUrl: `/api/assets/${asset.id}/download`,
+        createdAt: asset.createdAt.toISOString(), notes: []
+      });
+    }
+
+    if (!isLastChunk) return res.json({ driveSessionUri });
+    return res.status(502).json({ message: 'Drive did not confirm completion on the final chunk.' });
+
+  } catch (err) {
+    await unlink(localChunkPath).catch(() => undefined);
+    console.error('[song upload-chunk error]', err);
+    return res.status(500).json({ message: 'Failed to upload chunk to Google Drive.' });
+  }
 });
 
 songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {

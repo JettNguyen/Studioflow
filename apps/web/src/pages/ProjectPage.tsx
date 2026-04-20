@@ -813,7 +813,6 @@ export function ProjectPage() {
                     type="file"
                     multiple
                     onChange={e => setMiscSelectedFiles(Array.from(e.target.files ?? []))}
-                    required
                   />
                   <button
                     className="btn btn-primary btn-sm"

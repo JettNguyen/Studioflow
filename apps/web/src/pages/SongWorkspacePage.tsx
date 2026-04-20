@@ -10,7 +10,7 @@ import type {
 } from '@studioflow/shared';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useParams } from 'react-router-dom';
-import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
+import { apiRequest, uploadChunkedWithProgress, resolveApiUrl } from '../lib/api';
 import { analyzeAudioFile, type AudioFeatures } from '../lib/audioAnalysis';
 import { useDropZone } from '../context/DropZoneContext';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -311,24 +311,23 @@ export function SongWorkspacePage() {
       setError(null);
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
-        const fd = new FormData();
-        fd.append('file', file);
-        fd.append('category', assetCategory);
-        if (isSingle && assetName.trim()) fd.append('name', assetName.trim());
-        if (assetVersionGroup.trim()) fd.append('versionGroup', assetVersionGroup.trim());
-        // Only derive duration client-side for audio; large video metadata reads
-        // can stall the upload start on some devices/browsers.
+        const extraFields: Record<string, string> = {
+          mimeType: file.type || 'application/octet-stream',
+          category: assetCategory,
+        };
+        if (isSingle && assetName.trim()) extraFields.name = assetName.trim();
+        if (assetVersionGroup.trim()) extraFields.versionGroup = assetVersionGroup.trim();
         if (file.type.startsWith('audio/')) {
           const dur = await readFileDuration(file);
-          if (dur) fd.append('duration', dur);
+          if (dur) extraFields.duration = dur;
         }
         if (isSingle && assetCategory === 'Song Audio' && detectedFeatures) {
-          if (detectedFeatures.key) fd.append('detectedKey', detectedFeatures.key);
-          if (detectedFeatures.bpm !== null) fd.append('detectedBpm', String(detectedFeatures.bpm));
+          if (detectedFeatures.key) extraFields.detectedKey = detectedFeatures.key;
+          if (detectedFeatures.bpm !== null) extraFields.detectedBpm = String(detectedFeatures.bpm);
         }
-        await apiUploadWithProgress<SongAsset>(
-          `/songs/${songId}/assets`, fd,
-          pct => setUploadProgress(Math.round(((i + pct / 100) / selectedFiles.length) * 100))
+        await uploadChunkedWithProgress<SongAsset>(
+          `/songs/${songId}/assets/upload-chunk`, file, extraFields,
+          (pct: number) => setUploadProgress(Math.round(((i + pct / 100) / selectedFiles.length) * 100))
         );
       }
       setAssetName(''); setAssetVersionGroup(''); setSelectedFiles([]); setDetectedFeatures(null);
@@ -1024,7 +1023,6 @@ export function SongWorkspacePage() {
                       type="file"
                       multiple
                       onChange={e => setSelectedFiles(Array.from(e.target.files ?? []))}
-                      required
                     />
                     <button className="btn btn-primary btn-sm" type="submit" disabled={uploading || selectedFiles.length === 0} style={{ marginLeft: 'auto' }}>
                       {uploading ? 'Uploading…' : 'Upload'}
