@@ -33,14 +33,14 @@
   transform: translateY(-1px);
 }
 
-/* Cover image area */
+/* Cover image — full-width banner at top of card (hidden on very small screens) */
 .project-card__cover {
-  position: relative;
   width: 100%;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 16 / 7;
   overflow: hidden;
   background: #111;
   flex-shrink: 0;
+  display: block;
 }
 
 .project-card__cover-img {
@@ -48,47 +48,21 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  transition: transform 0.3s ease;
 }
 
-.project-card__cover-edit {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
-  width: 30px;
-  height: 30px;
+.project-card-wrap:hover .project-card__cover-img {
+  transform: scale(1.03);
+}
+
+/* Small square thumbnail shown inline next to the title */
+.project-card__cover-thumb {
+  width: 36px;
+  height: 36px;
   border-radius: var(--r-2);
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #fff;
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.project-card__cover:hover .project-card__cover-edit {
-  opacity: 1;
-}
-
-.project-card__cover-loading {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.5);
-}
-
-.project-card__cover-spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: cover-spin 0.7s linear infinite;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
 }
 
 @keyframes cover-spin {
@@ -108,9 +82,6 @@
   border-radius: 0;
 }
 
-.project-card:hover {
-  /* handled by .project-card-wrap */
-}
 
 .project-card__top {
   display: flex;
@@ -181,6 +152,7 @@
   flex: 1;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -205,4 +177,29 @@
 
 .project-card--skeleton .project-card {
   gap: 10px;
+}
+
+/* ── Mobile responsive ── */
+@media (max-width: 600px) {
+  .project-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .dashboard-create .form-row {
+    flex-direction: column;
+  }
+
+  .project-card__cover {
+    aspect-ratio: 16 / 6;
+  }
+
+  .project-card {
+    padding: 14px;
+    min-height: unset;
+  }
+
+  .project-card__title {
+    font-size: 16px;
+  }
 }

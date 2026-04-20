@@ -4,7 +4,7 @@
   "description": "Your music projects, organized.",
   "start_url": "/",
   "scope": "/",
-  "display": "browser",
+  "display": "standalone",
   "orientation": "portrait-primary",
   "theme_color": "#0e0e0e",
   "background_color": "#0e0e0e",
@@ -20,7 +20,7 @@
       "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "maskable"
     }
   ]
 }

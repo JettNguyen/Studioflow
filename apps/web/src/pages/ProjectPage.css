@@ -2,11 +2,128 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .project-drive-note {
   font-size: 12px;
   color: var(--text-2);
+}
+
+/* ── Project header cover thumbnail + button ── */
+.project-header-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.project-cover-btn {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-3);
+  border: 1.5px dashed var(--border-mid);
+  background: var(--surface-raised);
+  cursor: pointer;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: border-color 0.2s, background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.project-cover-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.project-cover-btn:disabled {
+  cursor: wait;
+}
+
+.project-cover-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: var(--r-3);
+}
+
+.project-cover-placeholder {
+  font-size: 16px;
+  color: var(--text-3);
+}
+
+.project-cover-spinner {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-3);
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.project-cover-spinner::after {
+  content: '';
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: cover-spin 0.7s linear infinite;
+}
+
+@keyframes cover-spin {
+  to { transform: rotate(360deg); }
+}
+
+.project-cover-done {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-3);
+  background: rgba(0, 180, 100, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 14px;
+}
+
+/* ── Mobile responsive ── */
+@media (max-width: 600px) {
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .page-header__aside {
+    width: 100%;
+  }
+
+  .project-drive-status {
+    gap: 8px;
+  }
+
+  .project-header-title-row h2 {
+    font-size: 20px;
+  }
+
+  .project-create .form-row {
+    flex-direction: column;
+  }
+
+  .song-row__stats {
+    display: none;
+  }
+
+  .misc-asset-row__main {
+    flex-wrap: wrap;
+  }
 }
 
 /* Create song form */

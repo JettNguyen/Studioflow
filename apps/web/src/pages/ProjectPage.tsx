@@ -2,8 +2,9 @@ import type { CreateSongRequest, ProjectDetails, SongWorkspace } from '@studiofl
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPencil, faCheck, faXmark, faTrash } from '@fortawesome/free-solid-svg-icons';
-import { apiRequest, uploadChunkedWithProgress, resolveApiUrl } from '../lib/api';
+import { faPencil, faCheck, faXmark, faTrash, faCamera } from '@fortawesome/free-solid-svg-icons';
+import { apiRequest, apiUpload, uploadChunkedWithProgress, resolveApiUrl } from '../lib/api';
+import { compressImage } from '../lib/imageUtils';
 import { useDropZone } from '../context/DropZoneContext';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -104,6 +105,9 @@ export function ProjectPage() {
   const [previewingAssetId, setPreviewingAssetId] = useState<string | null>(null);
   const [selectedVersionByGroup, setSelectedVersionByGroup] = useState<Record<string, string>>({});
   const miscFileInputRef = useRef<HTMLInputElement | null>(null);
+  const coverInputRef = useRef<HTMLInputElement | null>(null);
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [coverUploadDone, setCoverUploadDone] = useState(false);
 
   // Notes + overflow menu for project assets
   const [openAssetNotes, setOpenAssetNotes] = useState<Set<string>>(new Set());
@@ -249,6 +253,25 @@ export function ProjectPage() {
       setEditingProjectTitle(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to update project');
+    }
+  };
+
+  const uploadCover = async (file: File) => {
+    if (!projectId) return;
+    setCoverUploading(true);
+    setCoverUploadDone(false);
+    try {
+      const compressed = await compressImage(file);
+      const fd = new FormData();
+      fd.append('image', compressed);
+      const updated = await apiUpload<ProjectDetails>(`/projects/${projectId}/cover`, fd);
+      setProject(prev => prev ? { ...prev, coverImageUrl: updated.coverImageUrl ? updated.coverImageUrl + `?t=${Date.now()}` : updated.coverImageUrl } : prev);
+      setCoverUploadDone(true);
+      setTimeout(() => setCoverUploadDone(false), 2500);
+    } catch {
+      setError('Cover upload failed');
+    } finally {
+      setCoverUploading(false);
     }
   };
 
@@ -586,7 +609,32 @@ export function ProjectPage() {
       <div className="page-header">
         <div className="page-header__main">
           {!editingProjectTitle ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="project-header-title-row">
+              <button
+                className="project-cover-btn"
+                onClick={() => coverInputRef.current?.click()}
+                aria-label={project.coverImageUrl ? 'Change cover image' : 'Add cover image'}
+                title={project.coverImageUrl ? 'Change cover' : 'Add cover'}
+                disabled={coverUploading}
+              >
+                {project.coverImageUrl ? (
+                  <img
+                    src={resolveApiUrl(project.coverImageUrl)}
+                    alt="Project cover"
+                    className="project-cover-thumb"
+                  />
+                ) : (
+                  <span className="project-cover-placeholder">
+                    <FontAwesomeIcon icon={faCamera} />
+                  </span>
+                )}
+                {coverUploading && <span className="project-cover-spinner" aria-hidden="true" />}
+                {coverUploadDone && !coverUploading && (
+                  <span className="project-cover-done" aria-hidden="true">
+                    <FontAwesomeIcon icon={faCheck} />
+                  </span>
+                )}
+              </button>
               <h2 style={{ margin: 0 }}>{project.title}</h2>
               <button className="btn btn-ghost btn-icon" onClick={startEditProjectTitle} aria-label="Edit project title">
                 <FontAwesomeIcon icon={faPencil} />
@@ -605,6 +653,13 @@ export function ProjectPage() {
           )}
           {project.description && <p>{project.description}</p>}
         </div>
+        <input
+          ref={coverInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) { void uploadCover(f); e.target.value = ''; } }}
+        />
         <div className="page-header__aside project-drive-status">
           <button
             className={`btn btn-ghost btn-sm ${project.released ? 'released' : ''}`}
