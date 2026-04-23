@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
 import { AudioPlayerProvider } from './context/AudioPlayerContext';
 import { DropZoneProvider } from './context/DropZoneContext';
+import { ToastProvider } from './context/ToastContext';
 import App from './App';
 import './styles.css';
 
@@ -32,7 +33,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       >
         <AudioPlayerProvider>
           <DropZoneProvider>
-            <App />
+            <ToastProvider>
+              <App />
+            </ToastProvider>
           </DropZoneProvider>
         </AudioPlayerProvider>
       </BrowserRouter>

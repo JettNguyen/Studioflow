@@ -446,7 +446,7 @@
   min-width: 14px;
   height: 14px;
   padding: 0 3px;
-  background: var(--accent, #7c6aff);
+  background: var(--accent);
   color: #fff;
   font-size: 9px;
   font-weight: 700;
@@ -522,12 +522,12 @@
 }
 
 .asset-overflow__item--danger {
-  color: var(--red, #e05252);
+  color: var(--red);
 }
 
 .asset-overflow__item--danger:hover {
-  background: rgba(224, 82, 82, 0.1);
-  color: var(--red, #e05252);
+  background: var(--red-subtle);
+  color: var(--red);
 }
 
 /* ── Asset notes area (collapsible) ── */
@@ -722,6 +722,16 @@
 }
 
 .note-item:hover .note-item__delete {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .note-item__delete {
+    opacity: 0.5;
+  }
+}
+
+.note-item__delete:focus-visible {
   opacity: 1;
 }
 

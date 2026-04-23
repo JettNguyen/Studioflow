@@ -634,7 +634,7 @@
   height: 14px;
   padding: 0 3px;
   border-radius: 9px;
-  background: #9966cc;
+  background: var(--accent);
   color: #fff;
   font-size: 9px;
   font-weight: 700;
@@ -669,7 +669,7 @@
   right: 0;
   z-index: 300;
   min-width: 130px;
-  background: #1c1c1c;
+  background: var(--surface-raised);
   border: 1px solid var(--border-mid);
   border-radius: var(--r-2);
   box-shadow: var(--shadow-md);
@@ -758,6 +758,17 @@
 }
 
 .asset-note:hover .asset-note__delete {
+  opacity: 1;
+}
+
+/* Always show delete on touch devices and for keyboard focus */
+@media (pointer: coarse) {
+  .asset-note__delete {
+    opacity: 0.5;
+  }
+}
+
+.asset-note__delete:focus-visible {
   opacity: 1;
 }
 

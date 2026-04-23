@@ -1,0 +1,156 @@
+/* ── Toast stack ── */
+.toast-stack {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  align-items: flex-end;
+}
+
+/* When persistent player is showing, lift above it */
+[data-player='visible'] .toast-stack {
+  bottom: calc(72px + 20px);
+}
+
+/* ── Individual toast ── */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  min-width: 220px;
+  max-width: min(340px, calc(100vw - 40px));
+  background: var(--surface-raised);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  color: var(--text);
+  pointer-events: all;
+  animation: toast-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.toast--exiting {
+  animation: toast-out 0.3s ease forwards;
+}
+
+/* Tone variants — left accent border */
+.toast--success {
+  border-left: 3px solid var(--green);
+}
+
+.toast--error {
+  border-left: 3px solid var(--red);
+}
+
+.toast--info {
+  border-left: 3px solid var(--accent);
+}
+
+/* Icon */
+.toast__icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.toast--success .toast__icon { color: var(--green); }
+.toast--error   .toast__icon { color: var(--red); }
+.toast--info    .toast__icon { color: var(--accent); }
+
+/* Message */
+.toast__message {
+  flex: 1;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+/* Dismiss button */
+.toast__dismiss {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: var(--r-1);
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
+  padding: 0;
+}
+
+.toast__dismiss:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+/* ── Animations ── */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(20px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(20px) scale(0.96);
+  }
+}
+
+/* ── Mobile: bottom-center ── */
+@media (max-width: 640px) {
+  .toast-stack {
+    bottom: 16px;
+    right: 16px;
+    left: 16px;
+    align-items: stretch;
+  }
+
+  [data-player='visible'] .toast-stack {
+    bottom: calc(90px + 16px);
+  }
+
+  .toast {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes toast-out {
+    from {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(12px) scale(0.97);
+    }
+  }
+}

@@ -2,10 +2,10 @@ import type { CreateSongRequest, ProjectDetails, SongWorkspace } from '@studiofl
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPencil, faCheck, faXmark, faTrash, faCamera } from '@fortawesome/free-solid-svg-icons';
-import { apiRequest, apiUpload, uploadChunkedWithProgress, resolveApiUrl } from '../lib/api';
-import { compressImage } from '../lib/imageUtils';
+import { faPencil, faCheck, faXmark, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
 import { useDropZone } from '../context/DropZoneContext';
+import { useToast } from '../context/ToastContext';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { WaveformPlayer } from '../components/WaveformPlayer';
@@ -71,15 +71,18 @@ function fmtFileType(type: string): string {
 export function ProjectPage() {
   const navigate = useNavigate();
   const { projectId } = useParams();
+  const { addToast } = useToast();
   const [project, setProject] = useState<ProjectDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState('');
   const [editingProjectTitle, setEditingProjectTitle] = useState(false);
   const [projectTitleInput, setProjectTitleInput] = useState('');
+  const [savingProjectTitle, setSavingProjectTitle] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingSongId, setEditingSongId] = useState<string | null>(null);
   const [editingSongTitle, setEditingSongTitle] = useState('');
+  const [savingSongTitle, setSavingSongTitle] = useState(false);
   const [draggedSongId, setDraggedSongId] = useState<string | null>(null);
   const [dragOverSongId, setDragOverSongId] = useState<string | null>(null);
   const [previewSongs, setPreviewSongs] = useState<ProjectDetails['songs']>([]);
@@ -105,9 +108,6 @@ export function ProjectPage() {
   const [previewingAssetId, setPreviewingAssetId] = useState<string | null>(null);
   const [selectedVersionByGroup, setSelectedVersionByGroup] = useState<Record<string, string>>({});
   const miscFileInputRef = useRef<HTMLInputElement | null>(null);
-  const coverInputRef = useRef<HTMLInputElement | null>(null);
-  const [coverUploading, setCoverUploading] = useState(false);
-  const [coverUploadDone, setCoverUploadDone] = useState(false);
 
   // Notes + overflow menu for project assets
   const [openAssetNotes, setOpenAssetNotes] = useState<Set<string>>(new Set());
@@ -172,8 +172,9 @@ export function ProjectPage() {
         apiRequest(`/projects/${projectId}/assets/${a.id}`, { method: 'PATCH', body: { category: newName } })
       ));
       setMiscAssets(prev => prev.map(a => a.category === oldName ? { ...a, category: newName } : a));
+      addToast('Folder renamed');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to rename folder');
+      addToast(err instanceof Error ? err.message : 'Failed to rename folder', 'error');
     } finally {
       setRenamingFolder(null);
     }
@@ -242,36 +243,20 @@ export function ProjectPage() {
   };
 
   const saveProjectTitle = async () => {
-    if (!projectId) return;
+    if (!projectId || !projectTitleInput.trim()) return;
+    setSavingProjectTitle(true);
     try {
       const updated = await apiRequest<ProjectDetails>(`/projects/${projectId}`, {
         method: 'PATCH',
-        body: { title: projectTitleInput }
+        body: { title: projectTitleInput.trim() }
       });
-
       setProject(updated);
       setEditingProjectTitle(false);
+      addToast('Project title saved');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to update project');
-    }
-  };
-
-  const uploadCover = async (file: File) => {
-    if (!projectId) return;
-    setCoverUploading(true);
-    setCoverUploadDone(false);
-    try {
-      const compressed = await compressImage(file);
-      const fd = new FormData();
-      fd.append('image', compressed);
-      const updated = await apiUpload<ProjectDetails>(`/projects/${projectId}/cover`, fd);
-      setProject(prev => prev ? { ...prev, coverImageUrl: updated.coverImageUrl ? updated.coverImageUrl + `?t=${Date.now()}` : updated.coverImageUrl } : prev);
-      setCoverUploadDone(true);
-      setTimeout(() => setCoverUploadDone(false), 2500);
-    } catch {
-      setError('Cover upload failed');
+      addToast(e instanceof Error ? e.message : 'Unable to update project', 'error');
     } finally {
-      setCoverUploading(false);
+      setSavingProjectTitle(false);
     }
   };
 
@@ -294,15 +279,20 @@ export function ProjectPage() {
   };
 
   const saveSongTitle = async (songId: string) => {
+    if (!editingSongTitle.trim()) return;
+    setSavingSongTitle(true);
     try {
-      await apiRequest(`/songs/${songId}`, { method: 'PATCH', body: { title: editingSongTitle } });
-      const newTitle = editingSongTitle;
+      await apiRequest(`/songs/${songId}`, { method: 'PATCH', body: { title: editingSongTitle.trim() } });
+      const newTitle = editingSongTitle.trim();
       setProject(prev => prev ? { ...prev, songs: prev.songs.map(s => s.id === songId ? { ...s, title: newTitle } : s) } : prev);
       setPreviewSongs(prev => prev.map(s => s.id === songId ? { ...s, title: newTitle } : s));
       setEditingSongId(null);
       setEditingSongTitle('');
+      addToast('Song renamed');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to update song title');
+      addToast(e instanceof Error ? e.message : 'Unable to update song title', 'error');
+    } finally {
+      setSavingSongTitle(false);
     }
   };
 
@@ -373,8 +363,9 @@ export function ProjectPage() {
       await apiRequest(`/songs/${songId}`, { method: 'DELETE' });
       setPreviewSongs(prev => prev.filter(s => s.id !== songId));
       setProject(prev => prev ? { ...prev, songs: prev.songs.filter(s => s.id !== songId) } : prev);
+      addToast(`"${songTitle}" deleted`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to delete song');
+      addToast(e instanceof Error ? e.message : 'Unable to delete song', 'error');
     }
   };
 
@@ -400,8 +391,9 @@ export function ProjectPage() {
         setMiscAssetName('');
         setMiscLinkUrl('');
         setMiscUploadOpen(false);
+        addToast('Link saved');
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to save link');
+        addToast(err instanceof Error ? err.message : 'Failed to save link', 'error');
       } finally {
         setMiscUploading(false);
       }
@@ -416,11 +408,13 @@ export function ProjectPage() {
       const added: ProjectAsset[] = [];
       for (let i = 0; i < miscSelectedFiles.length; i++) {
         const file = miscSelectedFiles[i];
-        const name = (miscSelectedFiles.length === 1 && miscAssetName.trim()) ? miscAssetName.trim() : file.name;
-        const newAsset = await uploadChunkedWithProgress<ProjectAsset>(
-          `/projects/${projectId}/assets/upload-chunk`,
-          file,
-          { name, mimeType: file.type || 'application/octet-stream', category: miscAssetCategory },
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('category', miscAssetCategory);
+        const name = miscSelectedFiles.length === 1 && miscAssetName.trim() ? miscAssetName.trim() : '';
+        if (name) fd.append('name', name);
+        const newAsset = await apiUploadWithProgress<ProjectAsset>(
+          `/projects/${projectId}/assets`, fd,
           pct => setMiscUploadProgress(Math.round(((i + pct / 100) / miscSelectedFiles.length) * 100))
         );
         added.push(newAsset);
@@ -431,8 +425,9 @@ export function ProjectPage() {
       setMiscAssetCategory('Other');
       if (miscFileInputRef.current) miscFileInputRef.current.value = '';
       setMiscUploadOpen(false);
+      addToast(added.length === 1 ? 'File uploaded' : `${added.length} files uploaded`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      addToast(err instanceof Error ? err.message : 'Upload failed', 'error');
     } finally {
       setMiscUploading(false);
       setMiscUploadProgress(null);
@@ -444,8 +439,9 @@ export function ProjectPage() {
     try {
       await apiRequest(`/projects/${projectId}/assets/${assetId}`, { method: 'DELETE' });
       setMiscAssets(prev => prev.filter(a => a.id !== assetId));
+      addToast(`"${assetName}" deleted`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove file');
+      addToast(err instanceof Error ? err.message : 'Failed to remove file', 'error');
     }
   };
 
@@ -461,8 +457,9 @@ export function ProjectPage() {
         a.id === assetId ? { ...a, notes: [...a.notes, note] } : a
       ));
       setAssetNoteDrafts(prev => ({ ...prev, [assetId]: '' }));
+      addToast('Note added');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add note');
+      addToast(err instanceof Error ? err.message : 'Failed to add note', 'error');
     }
   };
 
@@ -473,8 +470,9 @@ export function ProjectPage() {
       setMiscAssets(prev => prev.map(a =>
         a.id === assetId ? { ...a, notes: a.notes.filter(n => n.id !== noteId) } : a
       ));
+      addToast('Note deleted');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete note');
+      addToast(err instanceof Error ? err.message : 'Failed to delete note', 'error');
     }
   };
 
@@ -502,9 +500,9 @@ export function ProjectPage() {
       });
       setMiscAssets(prev => prev.map(a => a.id === asset.id ? updated : a));
       setEditingMiscAssetId(null);
-      setError(null);
+      addToast('File updated');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update project file');
+      addToast(err instanceof Error ? err.message : 'Failed to update project file', 'error');
     } finally {
       setSavingMiscAssetEdit(false);
     }
@@ -609,32 +607,7 @@ export function ProjectPage() {
       <div className="page-header">
         <div className="page-header__main">
           {!editingProjectTitle ? (
-            <div className="project-header-title-row">
-              <button
-                className="project-cover-btn"
-                onClick={() => coverInputRef.current?.click()}
-                aria-label={project.coverImageUrl ? 'Change cover image' : 'Add cover image'}
-                title={project.coverImageUrl ? 'Change cover' : 'Add cover'}
-                disabled={coverUploading}
-              >
-                {project.coverImageUrl ? (
-                  <img
-                    src={resolveApiUrl(project.coverImageUrl)}
-                    alt="Project cover"
-                    className="project-cover-thumb"
-                  />
-                ) : (
-                  <span className="project-cover-placeholder">
-                    <FontAwesomeIcon icon={faCamera} />
-                  </span>
-                )}
-                {coverUploading && <span className="project-cover-spinner" aria-hidden="true" />}
-                {coverUploadDone && !coverUploading && (
-                  <span className="project-cover-done" aria-hidden="true">
-                    <FontAwesomeIcon icon={faCheck} />
-                  </span>
-                )}
-              </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <h2 style={{ margin: 0 }}>{project.title}</h2>
               <button className="btn btn-ghost btn-icon" onClick={startEditProjectTitle} aria-label="Edit project title">
                 <FontAwesomeIcon icon={faPencil} />
@@ -642,24 +615,17 @@ export function ProjectPage() {
             </div>
           ) : (
             <div style={{ display: 'flex', gap: 8 }}>
-              <input className="input" value={projectTitleInput} onChange={(e) => setProjectTitleInput(e.target.value)} />
-              <button className="btn btn-primary btn-icon" onClick={saveProjectTitle} aria-label="Save">
+              <input className="input" value={projectTitleInput} onChange={(e) => setProjectTitleInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveProjectTitle(); if (e.key === 'Escape') setEditingProjectTitle(false); }} autoFocus />
+              <button className="btn btn-primary btn-icon" onClick={saveProjectTitle} aria-label="Save" disabled={savingProjectTitle || !projectTitleInput.trim()}>
                 <FontAwesomeIcon icon={faCheck} />
               </button>
-              <button className="btn btn-ghost btn-icon" onClick={() => setEditingProjectTitle(false)} aria-label="Cancel">
+              <button className="btn btn-ghost btn-icon" onClick={() => setEditingProjectTitle(false)} aria-label="Cancel" disabled={savingProjectTitle}>
                 <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
           )}
           {project.description && <p>{project.description}</p>}
         </div>
-        <input
-          ref={coverInputRef}
-          type="file"
-          accept="image/*"
-          style={{ display: 'none' }}
-          onChange={e => { const f = e.target.files?.[0]; if (f) { void uploadCover(f); e.target.value = ''; } }}
-        />
         <div className="page-header__aside project-drive-status">
           <button
             className={`btn btn-ghost btn-sm ${project.released ? 'released' : ''}`}
@@ -745,11 +711,11 @@ export function ProjectPage() {
                 </button>
               ) : (
                 <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input className="input" value={editingSongTitle} onChange={(e) => setEditingSongTitle(e.target.value)} />
-                  <button className="btn btn-primary btn-icon" onClick={() => saveSongTitle(song.id)} aria-label="Save">
+                  <input className="input" value={editingSongTitle} onChange={(e) => setEditingSongTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveSongTitle(song.id); if (e.key === 'Escape') setEditingSongId(null); }} autoFocus />
+                  <button className="btn btn-primary btn-icon" onClick={() => saveSongTitle(song.id)} aria-label="Save" disabled={savingSongTitle || !editingSongTitle.trim()}>
                     <FontAwesomeIcon icon={faCheck} />
                   </button>
-                  <button className="btn btn-ghost btn-icon" onClick={() => setEditingSongId(null)} aria-label="Cancel">
+                  <button className="btn btn-ghost btn-icon" onClick={() => setEditingSongId(null)} aria-label="Cancel" disabled={savingSongTitle}>
                     <FontAwesomeIcon icon={faXmark} />
                   </button>
                   <button className="btn btn-danger btn-icon" onClick={() => openConfirm({
@@ -868,6 +834,7 @@ export function ProjectPage() {
                     type="file"
                     multiple
                     onChange={e => setMiscSelectedFiles(Array.from(e.target.files ?? []))}
+                    required
                   />
                   <button
                     className="btn btn-primary btn-sm"
@@ -961,9 +928,7 @@ export function ProjectPage() {
                   const selectedId = selectedVersionByGroup[groupKey] ?? versions[0].id;
                   const asset = versions.find(v => v.id === selectedId) ?? versions[0];
                   const mediaKind = asset.isLink ? 'other' : getMediaKind(asset.type);
-                  const gdocMatch = asset.isLink ? asset.downloadUrl.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/) : null;
-                  const gdocEmbedUrl = gdocMatch ? `https://docs.google.com/document/d/${gdocMatch[1]}/preview?embedded=true` : null;
-                  const previewable = mediaKind === 'audio' || mediaKind === 'video' || mediaKind === 'image' || Boolean(gdocEmbedUrl);
+                  const previewable = mediaKind === 'audio' || mediaKind === 'video' || mediaKind === 'image';
                   const isPreviewing = previewingAssetId === asset.id;
                   const assetSrc = resolveApiUrl(asset.downloadUrl);
                   return (
@@ -1173,14 +1138,6 @@ export function ProjectPage() {
                             className="misc-asset-preview__image"
                             src={assetSrc}
                             alt={asset.name}
-                          />
-                        )}
-                        {gdocEmbedUrl && (
-                          <iframe
-                            className="misc-asset-preview__gdoc"
-                            src={gdocEmbedUrl}
-                            title={asset.name}
-                            allowFullScreen
                           />
                         )}
                       </div>
