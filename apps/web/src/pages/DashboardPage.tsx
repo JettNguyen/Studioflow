@@ -23,6 +23,7 @@ async function compressImage(file: File, maxDim = 1200, quality = 0.82): Promise
       canvas.toBlob(
         (blob) => {
           if (!blob || blob.size >= file.size) {
+            // Compression made it larger or failed — use the original
             resolve(file);
           } else {
             resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
@@ -79,7 +80,6 @@ function ProjectCard({
       <div className="project-card__drag-handle" aria-hidden="true">
         <FontAwesomeIcon icon={faGripVertical} />
       </div>
-
       {project.coverImageUrl && (
         <div className="project-card__cover">
           <img
@@ -219,6 +219,8 @@ export function DashboardPage() {
         fd,
         () => {}
       );
+      // Append a timestamp so the browser fetches the new image instead of
+      // serving the old one from cache (the URL path is the same after re-upload).
       const bust = `?t=${Date.now()}`;
       setProjects(prev => prev.map(p => p.id === projectId
         ? { ...p, coverImageUrl: updated.coverImageUrl ? updated.coverImageUrl + bust : updated.coverImageUrl }
@@ -251,11 +253,9 @@ export function DashboardPage() {
   const onDragOver = (e: DragEvent<HTMLDivElement>, targetId: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    const fromId = draggedProjectId || e.dataTransfer.getData('text/plain');
+    const fromId = e.dataTransfer.getData('text/plain') || draggedProjectId;
     if (!fromId || fromId === targetId) return;
-
     if (dragOverProjectId !== targetId) setDragOverProjectId(targetId);
-
     setProjects(current => {
       const fromIndex = current.findIndex(p => p.id === fromId);
       const toIndex = current.findIndex(p => p.id === targetId);

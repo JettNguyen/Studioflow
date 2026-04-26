@@ -46,7 +46,7 @@
   transform: scale(1.01);
 }
 
-/* Drag handle — shown on hover in the top-right corner */
+/* Drag handle — visible on hover in the top-right corner */
 .project-card__drag-handle {
   position: absolute;
   top: 8px;

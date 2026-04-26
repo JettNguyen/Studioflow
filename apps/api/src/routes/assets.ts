@@ -319,6 +319,9 @@ assetRouter.get('/:assetId/download', async (req, res) => {
     return res.status(404).json({ message: 'Asset not found' });
   }
 
+  const encodedName = encodeURIComponent(asset.name);
+  const contentDisposition = `attachment; filename="${encodedName}"; filename*=UTF-8''${encodedName}`;
+
   // S3 path
   if (asset.storageKey && (isS3StorageKey(asset.storageKey) || env.s3Enabled)) {
     try {
@@ -329,7 +332,7 @@ assetRouter.get('/:assetId/download', async (req, res) => {
         return res.status(404).json({ message: 'Asset not available in storage' });
       }
 
-      res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
+      res.setHeader('Content-Disposition', contentDisposition);
       res.setHeader('Content-Type', object.ContentType || asset.type || 'application/octet-stream');
       (body as NodeJS.ReadableStream).pipe(res);
       return;
@@ -342,7 +345,7 @@ assetRouter.get('/:assetId/download', async (req, res) => {
   // Local file path
   const fullPath = asset.storageKey ? resolveStoredFilePath(asset.storageKey) : null;
   if (fullPath && existsSync(fullPath)) {
-    res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
+    res.setHeader('Content-Disposition', contentDisposition);
     res.setHeader('Content-Type', asset.type || 'application/octet-stream');
     createReadStream(fullPath).pipe(res);
     return;
@@ -354,7 +357,7 @@ assetRouter.get('/:assetId/download', async (req, res) => {
     for (const googleAccount of drivePlan.accounts) {
       try {
         const driveObject = await getDriveFileStream(googleAccount, drivePlan.driveFileId);
-        res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
+        res.setHeader('Content-Disposition', contentDisposition);
         res.setHeader('Content-Type', driveObject.mimeType || asset.type || 'application/octet-stream');
         driveObject.stream.pipe(res);
         return;
@@ -368,7 +371,7 @@ assetRouter.get('/:assetId/download', async (req, res) => {
       for (const googleAccount of drivePlan.accounts) {
         try {
           const driveObject = await getDriveFileStream(googleAccount, recovered.driveFileId);
-          res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
+          res.setHeader('Content-Disposition', contentDisposition);
           res.setHeader('Content-Type', driveObject.mimeType || asset.type || 'application/octet-stream');
           driveObject.stream.pipe(res);
           return;
@@ -386,7 +389,7 @@ assetRouter.get('/:assetId/download', async (req, res) => {
 assetRouter.delete('/:assetId', async (req, res) => {
   const asset = await findAuthorizedAsset(req.params.assetId, req.user!.id);
 
-  if (!asset || !asset.storageKey) {
+  if (!asset) {
     return res.status(404).json({ message: 'Asset not found' });
   }
 
@@ -402,12 +405,14 @@ assetRouter.delete('/:assetId', async (req, res) => {
       }
     }
 
-    if (isS3StorageKey(asset.storageKey)) {
-      await deleteS3Object(asset.storageKey);
-    } else {
-      const fullPath = resolveStoredFilePath(asset.storageKey);
-      if (existsSync(fullPath)) {
-        await unlink(fullPath);
+    if (asset.storageKey) {
+      if (isS3StorageKey(asset.storageKey)) {
+        await deleteS3Object(asset.storageKey);
+      } else {
+        const fullPath = resolveStoredFilePath(asset.storageKey);
+        if (existsSync(fullPath)) {
+          await unlink(fullPath);
+        }
       }
     }
   } catch {
