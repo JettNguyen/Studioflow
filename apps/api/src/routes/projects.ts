@@ -147,27 +147,32 @@ const createProjectSchema = z.object({
 projectRouter.use(requireAuth);
 
 projectRouter.get('/', async (req, res) => {
-  const memberships = await prisma.projectMembership.findMany({
-    where: { userId: req.user!.id },
-    select: {
-      project: {
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          genre: true,
-          released: true,
-          coverImageKey: true,
-          driveSyncStatus: true,
-          _count: { select: { songs: true, memberships: true, projectAssets: true } }
-        }
+  const where = { userId: req.user!.id };
+  const select = {
+    project: {
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        genre: true,
+        released: true,
+        coverImageKey: true,
+        driveSyncStatus: true,
+        _count: { select: { songs: true, memberships: true, projectAssets: true } }
       }
-    },
-    orderBy: [
-      { position: { sort: 'asc', nulls: 'last' } },
-      { createdAt: 'desc' }
-    ]
-  });
+    }
+  };
+
+  let memberships;
+  try {
+    memberships = await prisma.projectMembership.findMany({
+      where,
+      select,
+      orderBy: [{ position: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]
+    });
+  } catch {
+    memberships = await prisma.projectMembership.findMany({ where, select, orderBy: { createdAt: 'desc' } });
+  }
 
   res.json(memberships.map(m => mapProjectSummary(m.project)));
 });
@@ -189,14 +194,11 @@ projectRouter.post('/reorder', async (req, res) => {
     return res.status(400).json({ message: 'Order must include all projects' });
   }
 
-  const updates = payload.order.map((projectId, idx) =>
-    prisma.projectMembership.update({
-      where: { id: membershipByProjectId.get(projectId)! },
-      data: { position: idx }
-    })
+  await prisma.$transaction(
+    payload.order.map((projectId, idx) =>
+      prisma.$executeRaw`UPDATE "ProjectMembership" SET position = ${idx} WHERE id = ${membershipByProjectId.get(projectId)!}`
+    )
   );
-
-  await prisma.$transaction(updates);
 
   res.json({ ok: true });
 });
