@@ -98,6 +98,7 @@ model ProjectMembership {
   userId    String
   projectId String
   role      ProjectRole @default(Viewer)
+  position  Int?
   createdAt DateTime    @default(now())
   project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)

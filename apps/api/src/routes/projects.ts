@@ -163,10 +163,42 @@ projectRouter.get('/', async (req, res) => {
         }
       }
     },
-    orderBy: { createdAt: 'desc' }
+    orderBy: [
+      { position: { sort: 'asc', nulls: 'last' } },
+      { createdAt: 'desc' }
+    ]
   });
 
   res.json(memberships.map(m => mapProjectSummary(m.project)));
+});
+
+projectRouter.post('/reorder', async (req, res) => {
+  const payload = req.body as { order?: string[] } | undefined;
+  if (!payload?.order || !Array.isArray(payload.order)) {
+    return res.status(400).json({ message: 'Invalid payload' });
+  }
+
+  const memberships = await prisma.projectMembership.findMany({
+    where: { userId: req.user!.id },
+    select: { id: true, projectId: true }
+  });
+
+  const membershipByProjectId = new Map(memberships.map(m => [m.projectId, m.id]));
+
+  if (payload.order.length !== memberships.length || payload.order.some(id => !membershipByProjectId.has(id))) {
+    return res.status(400).json({ message: 'Order must include all projects' });
+  }
+
+  const updates = payload.order.map((projectId, idx) =>
+    prisma.projectMembership.update({
+      where: { id: membershipByProjectId.get(projectId)! },
+      data: { position: idx }
+    })
+  );
+
+  await prisma.$transaction(updates);
+
+  res.json({ ok: true });
 });
 
 projectRouter.post('/', async (req, res) => {

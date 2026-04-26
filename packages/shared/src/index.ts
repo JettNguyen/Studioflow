@@ -152,6 +152,10 @@ export interface CreateProjectRequest {
   genre?: string;
 }
 
+export interface ReorderProjectsRequest {
+  order: string[];
+}
+
 export interface CreateSongRequest {
   title: string;
   status?: string;

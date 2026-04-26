@@ -1,8 +1,8 @@
-import type { CreateProjectRequest, ProjectDetails, ProjectSummary } from '@studioflow/shared';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import type { CreateProjectRequest, ProjectDetails, ProjectSummary, ReorderProjectsRequest } from '@studioflow/shared';
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCamera } from '@fortawesome/free-solid-svg-icons';
+import { faCamera, faGripVertical } from '@fortawesome/free-solid-svg-icons';
 import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
 import './DashboardPage.css';
 
@@ -23,7 +23,6 @@ async function compressImage(file: File, maxDim = 1200, quality = 0.82): Promise
       canvas.toBlob(
         (blob) => {
           if (!blob || blob.size >= file.size) {
-            // Compression made it larger or failed — use the original
             resolve(file);
           } else {
             resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
@@ -44,13 +43,43 @@ interface ProjectCardProps {
   project: ProjectSummaryWithAssetCount;
   onCoverUpload?: (file: File) => void;
   uploadingCover?: boolean;
+  isDragOver?: boolean;
+  isDragging?: boolean;
+  onDragStart?: (e: DragEvent<HTMLDivElement>) => void;
+  onDragOver?: (e: DragEvent<HTMLDivElement>) => void;
+  onDragLeave?: (e: DragEvent<HTMLDivElement>) => void;
+  onDrop?: (e: DragEvent<HTMLDivElement>) => void;
+  onDragEnd?: (e: DragEvent<HTMLDivElement>) => void;
 }
 
-function ProjectCard({ project, onCoverUpload, uploadingCover }: ProjectCardProps) {
+function ProjectCard({
+  project,
+  onCoverUpload,
+  uploadingCover,
+  isDragOver,
+  isDragging,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+}: ProjectCardProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <div className="project-card-wrap">
+    <div
+      className={`project-card-wrap${isDragOver ? ' drag-over' : ''}${isDragging ? ' dragging' : ''}`}
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+    >
+      <div className="project-card__drag-handle" aria-hidden="true">
+        <FontAwesomeIcon icon={faGripVertical} />
+      </div>
+
       {project.coverImageUrl && (
         <div className="project-card__cover">
           <img
@@ -142,6 +171,8 @@ export function DashboardPage() {
   const [genre, setGenre] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [uploadingCoverId, setUploadingCoverId] = useState<string | null>(null);
+  const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
+  const [dragOverProjectId, setDragOverProjectId] = useState<string | null>(null);
 
   useEffect(() => {
     apiRequest<ProjectSummaryWithAssetCount[]>('/projects')
@@ -188,8 +219,6 @@ export function DashboardPage() {
         fd,
         () => {}
       );
-      // Append a timestamp so the browser fetches the new image instead of
-      // serving the old one from cache (the URL path is the same after re-upload).
       const bust = `?t=${Date.now()}`;
       setProjects(prev => prev.map(p => p.id === projectId
         ? { ...p, coverImageUrl: updated.coverImageUrl ? updated.coverImageUrl + bust : updated.coverImageUrl }
@@ -200,6 +229,62 @@ export function DashboardPage() {
     } finally {
       setUploadingCoverId(null);
     }
+  };
+
+  const reorderProjects = async (newOrder: string[]) => {
+    try {
+      await apiRequest('/projects/reorder', {
+        method: 'POST',
+        body: { order: newOrder } satisfies ReorderProjectsRequest
+      });
+    } catch {
+      // non-blocking — optimistic order already applied
+    }
+  };
+
+  const onDragStart = (e: DragEvent<HTMLDivElement>, projectId: string) => {
+    setDraggedProjectId(projectId);
+    e.dataTransfer.setData('text/plain', projectId);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const onDragOver = (e: DragEvent<HTMLDivElement>, targetId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const fromId = draggedProjectId || e.dataTransfer.getData('text/plain');
+    if (!fromId || fromId === targetId) return;
+
+    if (dragOverProjectId !== targetId) setDragOverProjectId(targetId);
+
+    setProjects(current => {
+      const fromIndex = current.findIndex(p => p.id === fromId);
+      const toIndex = current.findIndex(p => p.id === targetId);
+      if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return current;
+      const next = [...current];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  };
+
+  const onDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOverProjectId(null);
+  };
+
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOverProjectId(null);
+    setDraggedProjectId(null);
+    setProjects(current => {
+      reorderProjects(current.map(p => p.id));
+      return current;
+    });
+  };
+
+  const onDragEnd = () => {
+    setDraggedProjectId(null);
+    setDragOverProjectId(null);
   };
 
   return (
@@ -263,6 +348,13 @@ export function DashboardPage() {
               project={project}
               onCoverUpload={(file) => uploadCover(project.id, file)}
               uploadingCover={uploadingCoverId === project.id}
+              isDragging={draggedProjectId === project.id}
+              isDragOver={dragOverProjectId === project.id}
+              onDragStart={(e) => onDragStart(e, project.id)}
+              onDragOver={(e) => onDragOver(e, project.id)}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
+              onDragEnd={onDragEnd}
             />
           ))}
         </div>

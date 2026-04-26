@@ -24,13 +24,44 @@
   border-radius: var(--r-4);
   overflow: hidden;
   border: 1px solid var(--border);
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s, opacity 0.2s;
+  position: relative;
+  cursor: grab;
 }
 
 .project-card-wrap:hover {
   border-color: var(--border-mid);
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
+}
+
+.project-card-wrap.dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+
+.project-card-wrap.drag-over {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+  transform: scale(1.01);
+}
+
+/* Drag handle — shown on hover in the top-right corner */
+.project-card__drag-handle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  color: var(--text-3);
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+  line-height: 1;
+}
+
+.project-card-wrap:hover .project-card__drag-handle {
+  opacity: 1;
 }
 
 /* Cover image — square banner at top of card */
