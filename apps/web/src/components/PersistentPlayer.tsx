@@ -52,9 +52,7 @@ export function PersistentPlayer() {
         <div className="pp__meta">
           <span className="pp__title">{currentTrack.subtitle || currentTrack.title}</span>
           <span className="pp__subtitle">
-            {currentTrack.artist
-              ? `${currentTrack.artist}${currentTrack.subtitle ? ' · ' + currentTrack.title : ''}`
-              : currentTrack.title}
+            {currentTrack.artist || currentTrack.title}
           </span>
         </div>
       </button>
