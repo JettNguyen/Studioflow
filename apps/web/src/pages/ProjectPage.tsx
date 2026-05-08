@@ -79,6 +79,9 @@ export function ProjectPage() {
   const [editingProjectTitle, setEditingProjectTitle] = useState(false);
   const [projectTitleInput, setProjectTitleInput] = useState('');
   const [savingProjectTitle, setSavingProjectTitle] = useState(false);
+  const [editingArtist, setEditingArtist] = useState(false);
+  const [artistInput, setArtistInput] = useState('');
+  const [savingArtist, setSavingArtist] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingSongId, setEditingSongId] = useState<string | null>(null);
   const [editingSongTitle, setEditingSongTitle] = useState('');
@@ -257,6 +260,23 @@ export function ProjectPage() {
       addToast(e instanceof Error ? e.message : 'Unable to update project', 'error');
     } finally {
       setSavingProjectTitle(false);
+    }
+  };
+
+  const saveArtist = async () => {
+    if (!projectId) return;
+    setSavingArtist(true);
+    try {
+      const updated = await apiRequest<ProjectDetails>(`/projects/${projectId}`, {
+        method: 'PATCH',
+        body: { artist: artistInput }
+      });
+      setProject(updated);
+      setEditingArtist(false);
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Unable to update artist', 'error');
+    } finally {
+      setSavingArtist(false);
     }
   };
 
@@ -625,6 +645,42 @@ export function ProjectPage() {
             </div>
           )}
           {project.description && <p>{project.description}</p>}
+
+          {/* Artist inline edit */}
+          {!editingArtist ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <span style={{ fontSize: 13, color: 'var(--text-3)' }}>
+                {project.artist || 'No artist set'}
+              </span>
+              <button
+                className="btn btn-ghost btn-icon"
+                style={{ padding: '2px 4px' }}
+                onClick={() => { setArtistInput(project.artist); setEditingArtist(true); }}
+                aria-label="Edit artist"
+                title="Edit artist"
+              >
+                <FontAwesomeIcon icon={faPencil} style={{ fontSize: 10 }} />
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 6, marginTop: 4, alignItems: 'center' }}>
+              <input
+                className="input"
+                style={{ fontSize: 13, padding: '3px 8px', height: 28 }}
+                value={artistInput}
+                onChange={(e) => setArtistInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') saveArtist(); if (e.key === 'Escape') setEditingArtist(false); }}
+                placeholder="Artist name"
+                autoFocus
+              />
+              <button className="btn btn-primary btn-icon" onClick={saveArtist} aria-label="Save artist" disabled={savingArtist}>
+                <FontAwesomeIcon icon={faCheck} />
+              </button>
+              <button className="btn btn-ghost btn-icon" onClick={() => setEditingArtist(false)} aria-label="Cancel" disabled={savingArtist}>
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+          )}
         </div>
         <div className="page-header__aside project-drive-status">
           <button
@@ -1122,6 +1178,8 @@ export function ProjectPage() {
                             src={assetSrc}
                             trackTitle={asset.name}
                             trackSubtitle={project?.title}
+                            trackArtist={project?.artist || undefined}
+                            artworkUrl={project?.coverImageUrl ?? undefined}
                             pageUrl={`/projects/${projectId}`}
                           />
                         )}

@@ -56,6 +56,7 @@ export interface LoginRequest {
 export interface ProjectSummary {
   id: string;
   title: string;
+  artist: string;
   description: string;
   genre: string;
   released: boolean;
@@ -78,6 +79,7 @@ export interface SongSummary {
 export interface ProjectDetails {
   id: string;
   title: string;
+  artist: string;
   description: string;
   genre: string;
   released: boolean;
@@ -134,6 +136,8 @@ export interface SongWorkspace {
   id: string;
   projectId: string;
   projectTitle: string;
+  projectArtist: string;
+  projectCoverImageUrl: string | null;
   title: string;
   released: boolean;
   status: string;

@@ -153,6 +153,7 @@ projectRouter.get('/', async (req, res) => {
       select: {
         id: true,
         title: true,
+        artist: true,
         description: true,
         genre: true,
         released: true,
@@ -285,7 +286,7 @@ projectRouter.get('/:projectId', async (req, res) => {
 
 // Update project fields (e.g. title, description, genre)
 projectRouter.patch('/:projectId', async (req, res) => {
-  const body = req.body as Partial<{ title: string; description: string; genre: string; released?: boolean }>;
+  const body = req.body as Partial<{ title: string; artist: string; description: string; genre: string; released?: boolean }>;
 
   const membership = await prisma.projectMembership.findFirst({
     where: { projectId: paramToString(req.params.projectId), userId: req.user!.id }
@@ -295,6 +296,7 @@ projectRouter.patch('/:projectId', async (req, res) => {
 
   const updates: Record<string, unknown> = {};
   if (typeof body.title === 'string' && body.title.trim().length > 0) updates.title = body.title.trim();
+  if (typeof body.artist === 'string') updates.artist = body.artist.trim();
   if (typeof body.description === 'string') updates.description = body.description;
   if (typeof body.genre === 'string' && body.genre.trim().length > 0) updates.genre = body.genre.trim();
   if (typeof body.released === 'boolean') updates.released = body.released;

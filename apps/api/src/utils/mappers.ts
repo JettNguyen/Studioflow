@@ -140,6 +140,7 @@ export function mapProjectSummary(
   project: {
     id: string;
     title: string;
+    artist: string;
     description: string;
     genre: string;
     coverImageKey: string | null;
@@ -151,6 +152,7 @@ export function mapProjectSummary(
   const out = {
     id: project.id,
     title: project.title,
+    artist: project.artist,
     description: project.description,
     genre: project.genre,
     released: Boolean(project.released),
@@ -188,6 +190,7 @@ export function mapProjectDetails(
   const out = {
     id: project.id,
     title: project.title,
+    artist: project.artist,
     description: project.description,
     genre: project.genre,
     released: Boolean((project as any).released),
@@ -223,12 +226,16 @@ export function mapSongWorkspace(
     notes: Array<{ id: string; body: string; createdAt: Date; author: User }>;
     tasks: Array<{ id: string; title: string; status: string; assignee: User | null }>;
   },
-  projectTitle = ''
+  projectTitle = '',
+  projectCoverImageKey: string | null = null,
+  projectArtist = ''
 ): SongWorkspace {
   const out = {
     id: song.id,
     projectId: song.projectId,
     projectTitle,
+    projectArtist,
+    projectCoverImageUrl: projectCoverImageKey ? `/api/projects/${song.projectId}/cover` : null,
     title: song.title,
     released: Boolean((song as any).released),
     status: song.status,

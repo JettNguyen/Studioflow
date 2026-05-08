@@ -211,7 +211,7 @@ songRouter.post('/project/:projectId', async (req, res) => {
     }
   });
 
-  res.status(201).json(mapSongWorkspace(song, membership.project.title));
+  res.status(201).json(mapSongWorkspace(song, membership.project.title, membership.project.coverImageKey, membership.project.artist));
 
   // Fire-and-forget: create Drive folder after responding so the client isn't blocked
   if (membership.project.driveFolderId) {
@@ -242,7 +242,7 @@ songRouter.get('/:songId', async (req, res) => {
       }
     },
     include: {
-      project: { select: { title: true } },
+      project: true,
       assets: {
         include: {
           notes: {
@@ -278,7 +278,7 @@ songRouter.get('/:songId', async (req, res) => {
     return res.status(404).json({ message: 'Song not found' });
   }
 
-  res.json(mapSongWorkspace(song, song.project.title));
+  res.json(mapSongWorkspace(song, song.project.title, song.project.coverImageKey, song.project.artist));
 });
 
 const updateSongSchema = z.object({
@@ -313,6 +313,7 @@ songRouter.patch('/:songId', async (req, res) => {
       ...(parsed.data.bpm !== undefined && { bpm: parsed.data.bpm }),
     },
     include: {
+      project: true,
       assets: { include: { notes: { include: { author: true }, orderBy: { createdAt: 'desc' } } } },
       notes: { include: { author: true }, orderBy: { createdAt: 'desc' } },
       tasks: { include: { assignee: true }, orderBy: { createdAt: 'desc' } },
@@ -354,7 +355,7 @@ songRouter.patch('/:songId', async (req, res) => {
 
   // Build response from the update result — no extra round-trip needed.
   // Merge the raw-SQL-applied values we just set.
-  res.json(mapSongWorkspace(Object.assign({}, song, { released: releasedValue, shotListUrl: shotListUrlValue })));
+  res.json(mapSongWorkspace(Object.assign({}, song, { released: releasedValue, shotListUrl: shotListUrlValue }), song.project.title, song.project.coverImageKey, song.project.artist));
 });
 
 songRouter.delete('/:songId', async (req, res) => {

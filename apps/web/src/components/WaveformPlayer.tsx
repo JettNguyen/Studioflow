@@ -4,10 +4,14 @@ import './WaveformPlayer.css';
 
 interface WaveformPlayerProps {
   src: string;
-  /** Displayed in the persistent bottom bar */
+  /** Displayed in the persistent bottom bar as the primary label */
   trackTitle?: string;
-  /** Secondary line in the persistent bottom bar (e.g. song name) */
+  /** Song title shown below the asset name */
   trackSubtitle?: string;
+  /** Project artist name */
+  trackArtist?: string;
+  /** Absolute or root-relative URL for the project cover image */
+  artworkUrl?: string;
   /** Route to navigate to when the bottom bar is clicked */
   pageUrl?: string;
 }
@@ -17,7 +21,7 @@ function fmt(s: number): string {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 }
 
-export function WaveformPlayer({ src, trackTitle, trackSubtitle, pageUrl }: WaveformPlayerProps) {
+export function WaveformPlayer({ src, trackTitle, trackSubtitle, trackArtist, artworkUrl, pageUrl }: WaveformPlayerProps) {
   const audioPlayer = useAudioPlayer();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -233,6 +237,8 @@ export function WaveformPlayer({ src, trackTitle, trackSubtitle, pageUrl }: Wave
         blobUrl: blobUrlRef.current,
         title: trackTitle || 'Audio',
         subtitle: trackSubtitle || '',
+        artist: trackArtist || '',
+        artworkUrl,
         pageUrl: pageUrl || window.location.pathname,
       });
     }

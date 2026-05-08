@@ -14,8 +14,14 @@ export interface TrackInfo {
   src: string;
   /** Blob URL handed off from the WaveformPlayer — context owns its lifecycle */
   blobUrl: string;
+  /** Asset/version name shown as the primary label in the player */
   title: string;
+  /** Song title shown below the asset name */
   subtitle: string;
+  /** Project artist name (shown in player and used for Media Session artist field) */
+  artist: string;
+  /** Absolute or root-relative URL for the project cover image */
+  artworkUrl?: string;
   /** Route to navigate to when the bottom bar is clicked */
   pageUrl: string;
 }
@@ -63,12 +69,91 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
     if (!playing) return;
     const tick = () => {
       const audio = audioRef.current;
-      if (audio) setTime(audio.currentTime);
+      if (audio) {
+        setTime(audio.currentTime);
+        if ('mediaSession' in navigator && isFinite(audio.duration) && audio.duration > 0) {
+          try {
+            navigator.mediaSession.setPositionState({
+              duration: audio.duration,
+              position: Math.min(audio.currentTime, audio.duration),
+              playbackRate: audio.playbackRate,
+            });
+          } catch { /* setPositionState not supported on this browser */ }
+        }
+      }
       animFrameRef.current = requestAnimationFrame(tick);
     };
     animFrameRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [playing]);
+
+  // ── Media Session API ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    if (!currentTrack) {
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.playbackState = 'none';
+      return;
+    }
+    const artworkSrc = currentTrack.artworkUrl
+      ? (/^https?:\/\//i.test(currentTrack.artworkUrl)
+          ? currentTrack.artworkUrl
+          : `${window.location.origin}${currentTrack.artworkUrl.startsWith('/') ? '' : '/'}${currentTrack.artworkUrl}`)
+      : null;
+    const artwork: MediaImage[] = artworkSrc
+      ? [{ src: artworkSrc, sizes: '512x512' }]
+      : [
+          { src: `${window.location.origin}/icon-512.png`, sizes: '512x512', type: 'image/png' },
+          { src: `${window.location.origin}/icon-192.png`, sizes: '192x192', type: 'image/png' },
+        ];
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: currentTrack.subtitle || currentTrack.title,
+      artist: currentTrack.artist,
+      album: currentTrack.artist ? currentTrack.subtitle : undefined,
+      artwork,
+    });
+  }, [currentTrack]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+  }, [playing]);
+
+  // Register Media Session action handlers once on mount
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    const audio = audioRef.current;
+
+    const handlers: Partial<Record<MediaSessionAction, MediaSessionActionHandler>> = {
+      play: () => { audio.play().catch(() => {}); setPlaying(true); },
+      pause: () => { audio.pause(); setPlaying(false); },
+      seekbackward: (d) => {
+        const skip = (d as MediaSessionActionDetails).seekOffset ?? 10;
+        audio.currentTime = Math.max(0, audio.currentTime - skip);
+        setTime(audio.currentTime);
+      },
+      seekforward: (d) => {
+        const skip = (d as MediaSessionActionDetails).seekOffset ?? 10;
+        audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + skip);
+        setTime(audio.currentTime);
+      },
+      seekto: (d) => {
+        const t = (d as MediaSessionActionDetails).seekTime;
+        if (t != null) { audio.currentTime = t; setTime(t); }
+      },
+    };
+
+    for (const [action, handler] of Object.entries(handlers) as [MediaSessionAction, MediaSessionActionHandler][]) {
+      try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* unsupported */ }
+    }
+
+    return () => {
+      for (const action of Object.keys(handlers) as MediaSessionAction[]) {
+        try { navigator.mediaSession.setActionHandler(action, null); } catch { /* unsupported */ }
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadTrack = useCallback((track: TrackInfo) => {
     const audio = audioRef.current;

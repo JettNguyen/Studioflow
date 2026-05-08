@@ -47,6 +47,7 @@ model OAuthAccount {
 model Project {
   id              String              @id @default(cuid())
   title           String
+  artist          String              @default("")
   description     String              @default("")
   genre           String              @default("Unspecified")
   coverImageKey   String?

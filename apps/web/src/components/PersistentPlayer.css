@@ -58,6 +58,14 @@
   justify-content: center;
   color: var(--accent);
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.pp__artwork {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .pp__meta {

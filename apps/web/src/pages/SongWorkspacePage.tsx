@@ -613,6 +613,8 @@ export function SongWorkspacePage() {
             src={resolveApiUrl(asset.streamUrl)}
             trackTitle={asset.name}
             trackSubtitle={song?.title}
+            trackArtist={song?.projectArtist || undefined}
+            artworkUrl={song?.projectCoverImageUrl ?? undefined}
             pageUrl={`/projects/${projectId}/songs/${songId}`}
           />
         )}

@@ -1,0 +1,1 @@
+ALTER TABLE "Project" ADD COLUMN "artist" TEXT NOT NULL DEFAULT '';

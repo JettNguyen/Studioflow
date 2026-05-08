@@ -37,16 +37,25 @@ export function PersistentPlayer() {
         aria-label={`${currentTrack.title} — click to go to track page`}
       >
         <div className="pp__icon" aria-hidden="true">
-          {/* Music note */}
-          <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor">
-            <path d="M11.5 1.5v8.25a2.25 2.25 0 1 1-1.5-2.12V4.5l-5 1.25v5a2.25 2.25 0 1 1-1.5-2.12V2.25L11.5 1.5Z" />
-          </svg>
+          {currentTrack.artworkUrl ? (
+            <img
+              className="pp__artwork"
+              src={currentTrack.artworkUrl}
+              alt=""
+            />
+          ) : (
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor">
+              <path d="M11.5 1.5v8.25a2.25 2.25 0 1 1-1.5-2.12V4.5l-5 1.25v5a2.25 2.25 0 1 1-1.5-2.12V2.25L11.5 1.5Z" />
+            </svg>
+          )}
         </div>
         <div className="pp__meta">
-          <span className="pp__title">{currentTrack.title}</span>
-          {currentTrack.subtitle && (
-            <span className="pp__subtitle">{currentTrack.subtitle}</span>
-          )}
+          <span className="pp__title">{currentTrack.subtitle || currentTrack.title}</span>
+          <span className="pp__subtitle">
+            {currentTrack.artist
+              ? `${currentTrack.artist}${currentTrack.subtitle ? ' · ' + currentTrack.title : ''}`
+              : currentTrack.title}
+          </span>
         </div>
       </button>
 
