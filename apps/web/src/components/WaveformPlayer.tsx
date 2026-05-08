@@ -27,6 +27,8 @@ export function WaveformPlayer({ src, trackTitle, trackSubtitle, pageUrl }: Wave
   const isDragging = useRef(false);
   // Blob URL created during decode — passed to context on play; not revoked here
   const blobUrlRef = useRef<string | null>(null);
+  // True once loadTrack() has been called — context owns the blob URL from that point
+  const handedOffRef = useRef(false);
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [time, setTime] = useState(0);
@@ -136,15 +138,14 @@ export function WaveformPlayer({ src, trackTitle, trackSubtitle, pageUrl }: Wave
 
     return () => {
       ctrl.abort();
-      // If this track is active in the context, the context owns the blob URL.
-      // Otherwise revoke it now so we don't leak memory.
-      if (blobUrlRef.current && !audioPlayer.isCurrentTrack(src)) {
+      // Revoke only if we still own the blob URL — once loadTrack() is called
+      // the context takes ownership and will revoke it when swapping tracks.
+      if (blobUrlRef.current && !handedOffRef.current) {
         URL.revokeObjectURL(blobUrlRef.current);
       }
       blobUrlRef.current = null;
+      handedOffRef.current = false;
     };
-    // audioPlayer intentionally excluded from deps — only re-run on src change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
   // ── Redraw on resize once ready ───────────────────────────────────────────
@@ -226,7 +227,7 @@ export function WaveformPlayer({ src, trackTitle, trackSubtitle, pageUrl }: Wave
     if (isActive) {
       audioPlayer.toggle();
     } else {
-      // Hand blob URL + metadata to the context — context owns the blob URL from here
+      handedOffRef.current = true;
       audioPlayer.loadTrack({
         src,
         blobUrl: blobUrlRef.current,
