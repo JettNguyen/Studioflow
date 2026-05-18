@@ -2,7 +2,7 @@ import type { CreateSongRequest, ProjectDetails, SongWorkspace } from '@studiofl
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPencil, faCheck, faXmark, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { faPencil, faCheck, faXmark, faTrash, faCamera } from '@fortawesome/free-solid-svg-icons';
 import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
 import { useDropZone } from '../context/DropZoneContext';
 import { useToast } from '../context/ToastContext';
@@ -10,6 +10,36 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { WaveformPlayer } from '../components/WaveformPlayer';
 import './ProjectPage.css';
+
+async function compressImage(file: File, maxDim = 1200, quality = 0.82): Promise<File> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob || blob.size >= file.size) {
+            resolve(file);
+          } else {
+            resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+          }
+        },
+        'image/jpeg',
+        quality
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
 
 function getMediaKind(type: string): 'audio' | 'video' | 'image' | 'other' {
   if (type.startsWith('audio/')) return 'audio';
@@ -111,6 +141,8 @@ export function ProjectPage() {
   const [previewingAssetId, setPreviewingAssetId] = useState<string | null>(null);
   const [selectedVersionByGroup, setSelectedVersionByGroup] = useState<Record<string, string>>({});
   const miscFileInputRef = useRef<HTMLInputElement | null>(null);
+  const coverFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadingCover, setUploadingCover] = useState(false);
 
   // Notes + overflow menu for project assets
   const [openAssetNotes, setOpenAssetNotes] = useState<Set<string>>(new Set());
@@ -238,6 +270,31 @@ export function ProjectPage() {
     if (!project) return;
     setPreviewSongs(project.songs);
   }, [project]);
+
+  const uploadCover = async (file: File) => {
+    if (!projectId) return;
+    const compressed = await compressImage(file);
+    const fd = new FormData();
+    fd.append('image', compressed);
+    setUploadingCover(true);
+    try {
+      const updated = await apiUploadWithProgress<ProjectDetails>(
+        `/projects/${projectId}/cover`,
+        fd,
+        () => {}
+      );
+      const bust = `?t=${Date.now()}`;
+      setProject(prev => prev ? {
+        ...prev,
+        coverImageUrl: updated.coverImageUrl ? updated.coverImageUrl + bust : updated.coverImageUrl
+      } : prev);
+      addToast('Cover updated');
+    } catch {
+      addToast('Failed to update cover', 'error');
+    } finally {
+      setUploadingCover(false);
+    }
+  };
 
   const startEditProjectTitle = () => {
     if (!project) return;
@@ -626,6 +683,25 @@ export function ProjectPage() {
 
       <div className="page-header">
         <div className="page-header__main">
+          <div className="project-header-title-row">
+            <button
+              className="project-cover-btn"
+              type="button"
+              onClick={() => coverFileInputRef.current?.click()}
+              disabled={uploadingCover}
+              aria-label={project.coverImageUrl ? 'Change cover image' : 'Add cover image'}
+              title={project.coverImageUrl ? 'Change cover image' : 'Add cover image'}
+            >
+              {project.coverImageUrl ? (
+                <img className="project-cover-thumb" src={resolveApiUrl(project.coverImageUrl)} alt="Cover" />
+              ) : (
+                <span className="project-cover-placeholder">
+                  <FontAwesomeIcon icon={faCamera} />
+                </span>
+              )}
+              {uploadingCover && <span className="project-cover-spinner" />}
+            </button>
+            <div>
           {!editingProjectTitle ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <h2 style={{ margin: 0 }}>{project.title}</h2>
@@ -681,6 +757,8 @@ export function ProjectPage() {
               </button>
             </div>
           )}
+            </div>
+          </div>
         </div>
         <div className="page-header__aside project-drive-status">
           <button
@@ -1267,6 +1345,16 @@ export function ProjectPage() {
         tone={confirmState?.tone ?? 'default'}
         onCancel={() => setConfirmState(null)}
         onConfirm={handleConfirm}
+      />
+      <input
+        ref={coverFileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={e => {
+          const file = e.target.files?.[0];
+          if (file) { uploadCover(file); e.target.value = ''; }
+        }}
       />
     </section>
   );

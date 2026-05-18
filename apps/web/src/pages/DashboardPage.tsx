@@ -1,49 +1,16 @@
 import type { CreateProjectRequest, ProjectDetails, ProjectSummary, ReorderProjectsRequest } from '@studioflow/shared';
-import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { useEffect, useState, type DragEvent, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCamera, faGripVertical } from '@fortawesome/free-solid-svg-icons';
-import { apiRequest, apiUploadWithProgress, resolveApiUrl } from '../lib/api';
+import { faGripVertical } from '@fortawesome/free-solid-svg-icons';
+import { apiRequest, resolveApiUrl } from '../lib/api';
 import './DashboardPage.css';
 
-/** Resize + compress an image file to fit within maxDim px and target ~qualityMB MB. */
-async function compressImage(file: File, maxDim = 1200, quality = 0.82): Promise<File> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-      const w = Math.round(img.width * scale);
-      const h = Math.round(img.height * scale);
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
-      canvas.toBlob(
-        (blob) => {
-          if (!blob || blob.size >= file.size) {
-            // Compression made it larger or failed — use the original
-            resolve(file);
-          } else {
-            resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
-          }
-        },
-        'image/jpeg',
-        quality
-      );
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
-    img.src = url;
-  });
-}
 
 type ProjectSummaryWithAssetCount = ProjectSummary & { projectAssetCount: number };
 
 interface ProjectCardProps {
   project: ProjectSummaryWithAssetCount;
-  onCoverUpload?: (file: File) => void;
-  uploadingCover?: boolean;
   isDragOver?: boolean;
   isDragging?: boolean;
   onDragStart?: (e: DragEvent<HTMLDivElement>) => void;
@@ -55,8 +22,6 @@ interface ProjectCardProps {
 
 function ProjectCard({
   project,
-  onCoverUpload,
-  uploadingCover,
   isDragOver,
   isDragging,
   onDragStart,
@@ -65,8 +30,6 @@ function ProjectCard({
   onDrop,
   onDragEnd,
 }: ProjectCardProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   return (
     <div
       className={`project-card-wrap${isDragOver ? ' drag-over' : ''}${isDragging ? ' dragging' : ''}`}
@@ -87,21 +50,6 @@ function ProjectCard({
             alt={`${project.title} cover`}
             className="project-card__cover-img"
           />
-          {uploadingCover && (
-            <div className="project-card__cover-loading">
-              <div className="project-card__cover-spinner" />
-            </div>
-          )}
-          {onCoverUpload && !uploadingCover && (
-            <button
-              className="project-card__cover-edit"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label="Change cover image"
-              type="button"
-            >
-              <FontAwesomeIcon icon={faCamera} />
-            </button>
-          )}
         </div>
       )}
 
@@ -113,17 +61,6 @@ function ProjectCard({
             )}
             <div className="project-card__title-col">
               <h3 className="project-card__title">{project.title}</h3>
-              {onCoverUpload && !project.coverImageUrl && (
-                <button
-                  className="btn btn-ghost btn-icon project-card__upload-btn"
-                  onClick={e => { e.preventDefault(); fileInputRef.current?.click(); }}
-                  aria-label="Upload cover image"
-                  type="button"
-                  title="Add cover image"
-                >
-                  <FontAwesomeIcon icon={faCamera} />
-                </button>
-              )}
             </div>
           </div>
 
@@ -145,18 +82,6 @@ function ProjectCard({
         </div>
       </Link>
 
-      {onCoverUpload && (
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          style={{ display: 'none' }}
-          onChange={e => {
-            const file = e.target.files?.[0];
-            if (file) { onCoverUpload(file); e.target.value = ''; }
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -170,7 +95,6 @@ export function DashboardPage() {
   const [description, setDescription] = useState('');
   const [genre, setGenre] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [uploadingCoverId, setUploadingCoverId] = useState<string | null>(null);
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
   const [dragOverProjectId, setDragOverProjectId] = useState<string | null>(null);
 
@@ -205,31 +129,6 @@ export function DashboardPage() {
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'Unable to create project');
       setCreating(false);
-    }
-  };
-
-  const uploadCover = async (projectId: string, file: File) => {
-    const compressed = await compressImage(file);
-    const fd = new FormData();
-    fd.append('image', compressed);
-    setUploadingCoverId(projectId);
-    try {
-      const updated = await apiUploadWithProgress<ProjectDetails>(
-        `/projects/${projectId}/cover`,
-        fd,
-        () => {}
-      );
-      // Append a timestamp so the browser fetches the new image instead of
-      // serving the old one from cache (the URL path is the same after re-upload).
-      const bust = `?t=${Date.now()}`;
-      setProjects(prev => prev.map(p => p.id === projectId
-        ? { ...p, coverImageUrl: updated.coverImageUrl ? updated.coverImageUrl + bust : updated.coverImageUrl }
-        : p
-      ));
-    } catch {
-      // non-blocking — user can retry
-    } finally {
-      setUploadingCoverId(null);
     }
   };
 
@@ -346,8 +245,6 @@ export function DashboardPage() {
             <ProjectCard
               key={project.id}
               project={project}
-              onCoverUpload={(file) => uploadCover(project.id, file)}
-              uploadingCover={uploadingCoverId === project.id}
               isDragging={draggedProjectId === project.id}
               isDragOver={dragOverProjectId === project.id}
               onDragStart={(e) => onDragStart(e, project.id)}
