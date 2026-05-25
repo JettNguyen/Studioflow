@@ -1,7 +1,6 @@
 import type {
   AssetCategory,
   CreateAssetNoteRequest,
-  CreateNoteRequest,
   CreateTaskRequest,
   SongAsset,
   SongTaskStatus,
@@ -118,10 +117,10 @@ export function SongWorkspacePage() {
   const [editBpm, setEditBpm] = useState('');
 
   // Notes + tasks
-  const [noteBody, setNoteBody] = useState('');
   const [taskTitle, setTaskTitle] = useState('');
   const [lyricsDraft, setLyricsDraft] = useState('');
   const [savingLyrics, setSavingLyrics] = useState(false);
+  const [lyricsSaveStatus, setLyricsSaveStatus] = useState<'idle' | 'saved'>('idle');
 
   // Collapsible asset sections — everything except Song Audio starts collapsed
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
@@ -136,7 +135,7 @@ export function SongWorkspacePage() {
 
   // Collapsible sidebar panels — all start collapsed
   const [collapsedPanels, setCollapsedPanels] = useState<Set<string>>(
-    new Set(['Song Notes', 'Tasks', 'Lyrics'])
+    new Set(['Tasks', 'Lyrics'])
   );
   const togglePanel = (panel: string) =>
     setCollapsedPanels(prev => {
@@ -371,8 +370,10 @@ export function SongWorkspacePage() {
       });
       setSong(updated);
       setLyricsDraft(updated.lyrics ?? '');
+      setLyricsSaveStatus('saved');
       setError(null);
     } catch (err) {
+      setLyricsSaveStatus('idle');
       setError(err instanceof Error ? err.message : 'Failed to save lyrics');
     } finally {
       setSavingLyrics(false);
@@ -398,18 +399,6 @@ export function SongWorkspacePage() {
     setEditingMeta(true);
   };
 
-  const createNote = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!songId || !song) return;
-    try {
-      const note = await apiRequest<SongWorkspace['notes'][number]>(`/songs/${songId}/notes`, {
-        method: 'POST', body: { body: noteBody } satisfies CreateNoteRequest
-      });
-      setSong({ ...song, notes: [note, ...song.notes] });
-      setNoteBody(''); setError(null);
-    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to add note'); }
-  };
-
   const createTask = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!songId || !song) return;
@@ -420,14 +409,6 @@ export function SongWorkspacePage() {
       setSong({ ...song, tasks: [task, ...song.tasks] });
       setTaskTitle(''); setError(null);
     } catch (err) { setError(err instanceof Error ? err.message : 'Failed to add task'); }
-  };
-
-  const deleteNote = async (noteId: string) => {
-    if (!songId || !song) return;
-    try {
-      await apiRequest(`/songs/${songId}/notes/${noteId}`, { method: 'DELETE' });
-      setSong({ ...song, notes: song.notes.filter(n => n.id !== noteId) });
-    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to delete note'); }
   };
 
   const deleteTask = async (taskId: string) => {
@@ -564,10 +545,15 @@ export function SongWorkspacePage() {
     return tags;
   };
 
-  const renderVersionedCard = (composedKey: string, group: { groupKey: string; versions: SongAsset[] }) => {
+  const renderVersionedCard = (
+    category: AssetCategory,
+    composedKey: string,
+    group: { groupKey: string; versions: SongAsset[] }
+  ) => {
     const selectedId = selectedVersionByGroup[composedKey] || group.versions[0].id;
     const asset = group.versions.find(v => v.id === selectedId) || group.versions[0];
     const notesOpen = openAssetNotes.has(asset.id);
+    const canManageNotes = category === 'Song Audio';
     const metaTags = renderMetaTags(asset);
     const isImage = asset.mediaKind === 'other' && asset.type.startsWith('image/');
 
@@ -662,18 +648,20 @@ export function SongWorkspacePage() {
               </svg>
             </button>
           )}
-          <button
-            className={`btn btn-ghost btn-icon asset-notes-toggle${notesOpen ? ' active' : ''}`}
-            type="button"
-            onClick={() => toggleAssetNotes(asset.id)}
-            aria-label={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
-            title={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
-          >
-            {asset.notes.length > 0 && <span className="asset-notes-badge">{asset.notes.length}</span>}
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path d="M2 2.5h8v5.5H5l-2.5 2v-2H2v-5.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-            </svg>
-          </button>
+          {canManageNotes && (
+            <button
+              className={`btn btn-ghost btn-icon asset-notes-toggle${notesOpen ? ' active' : ''}`}
+              type="button"
+              onClick={() => toggleAssetNotes(asset.id)}
+              aria-label={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
+              title={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
+            >
+              {asset.notes.length > 0 && <span className="asset-notes-badge">{asset.notes.length}</span>}
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M2 2.5h8v5.5H5l-2.5 2v-2H2v-5.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          )}
           {/* Overflow (3-dots) menu */}
           <div className="asset-overflow" onClick={(event) => event.stopPropagation()}>
             <button
@@ -787,7 +775,7 @@ export function SongWorkspacePage() {
         )}
 
         {/* Collapsible notes */}
-        {notesOpen && (
+        {canManageNotes && notesOpen && (
           <div className="asset-notes-area">
             <div className="form-stack">
               <textarea
@@ -886,6 +874,8 @@ export function SongWorkspacePage() {
       </section>
     );
   }
+
+  const hasLyricsChanges = lyricsDraft !== (song.lyrics ?? '');
 
   // ── Main render ───────────────────────────────────────────────────────────
 
@@ -1121,7 +1111,6 @@ export function SongWorkspacePage() {
                   {!isCollapsed && <div className="smc-list">
                     {smcAssets.map(asset => {
                       const isImg = asset.mediaKind === 'other' && asset.type.startsWith('image/');
-                      const notesOpen = openAssetNotes.has(asset.id);
                       return (
                         <div key={asset.id} className="smc-row">
                           <div className="smc-row__main">
@@ -1169,19 +1158,6 @@ export function SongWorkspacePage() {
                                   </svg>
                                 </button>
                               )}
-                              {/* Notes button — outside 3-dots */}
-                              <button
-                                className={`btn btn-ghost btn-icon asset-notes-toggle${notesOpen ? ' active' : ''}`}
-                                type="button"
-                                onClick={() => toggleAssetNotes(asset.id)}
-                                aria-label={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
-                                title={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
-                              >
-                                {asset.notes.length > 0 && <span className="asset-notes-badge">{asset.notes.length}</span>}
-                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                  <path d="M2 2.5h8v5.5H5l-2.5 2v-2H2v-5.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-                                </svg>
-                              </button>
                               {/* Overflow (3-dots) menu */}
                               <div className="asset-overflow" onClick={(event) => event.stopPropagation()}>
                                 <button
@@ -1295,54 +1271,6 @@ export function SongWorkspacePage() {
                             </div>
                           )}
 
-                          {/* Collapsible notes */}
-                          {notesOpen && (
-                            <div className="asset-notes-area">
-                              <div className="form-stack">
-                                <textarea
-                                  className="textarea"
-                                  value={assetNoteDrafts[asset.id] ?? ''}
-                                  onChange={e => setAssetNoteDrafts(d => ({ ...d, [asset.id]: e.target.value }))}
-                                  placeholder="Notes for this asset..."
-                                  style={{ minHeight: '60px' }}
-                                />
-                                <button
-                                  className="btn btn-ghost btn-sm"
-                                  type="button"
-                                  style={{ alignSelf: 'flex-start' }}
-                                  onClick={() => addAssetNote(asset)}
-                                >
-                                  Add note
-                                </button>
-                              </div>
-                              {asset.notes.length > 0 && (
-                                <ul className="note-list">
-                                  {asset.notes.map(note => (
-                                    <li key={note.id} className="note-item">
-                                      <div className="note-item__meta">
-                                        <span className="note-item__author">{note.author}</span>
-                                        <time className="note-item__time" dateTime={note.createdAt} title={fmtAbsolute(note.createdAt)}>
-                                          {timeAgo(note.createdAt)}
-                                        </time>
-                                        <button
-                                          className="btn btn-ghost btn-icon note-item__delete"
-                                          type="button"
-                                          onClick={() => deleteAssetNote(asset.id, note.id)}
-                                          aria-label="Delete note"
-                                          title="Delete note"
-                                        >
-                                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                            <path d="M2 3h8M5 3V2h2v1M3 3l.5 7h5L9 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                                          </svg>
-                                        </button>
-                                      </div>
-                                      <p className="note-item__body">{note.body}</p>
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                            </div>
-                          )}
                         </div>
                       );
                     })}
@@ -1370,7 +1298,7 @@ export function SongWorkspacePage() {
                 </button>
                 {!isCollapsed && (
                   <div className="asset-grid">
-                    {section.groups.map(group => renderVersionedCard(`${category}::${group.groupKey}`, group))}
+                    {section.groups.map(group => renderVersionedCard(category, `${category}::${group.groupKey}`, group))}
                   </div>
                 )}
               </div>
@@ -1464,61 +1392,6 @@ export function SongWorkspacePage() {
           <button
             className="sidebar-panel__title sidebar-panel__toggle"
             type="button"
-            onClick={() => togglePanel('Song Notes')}
-            aria-expanded={!collapsedPanels.has('Song Notes')}
-          >
-            <svg className={`asset-section__chevron${collapsedPanels.has('Song Notes') ? ' asset-section__chevron--collapsed' : ''}`} width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
-              <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            Song Notes
-            {song.notes.length > 0 && <span className="asset-section__count">{song.notes.length}</span>}
-          </button>
-          {!collapsedPanels.has('Song Notes') && (
-            <>
-              <form className="form-stack" onSubmit={createNote}>
-                <textarea
-                  className="textarea"
-                  value={noteBody}
-                  onChange={e => setNoteBody(e.target.value)}
-                  placeholder="Creative notes, mix changes, direction..."
-                  required
-                />
-                <button className="btn btn-ghost btn-sm" type="submit" style={{ alignSelf: 'flex-start' }}>Add note</button>
-              </form>
-              {song.notes.length > 0 && (
-                <ul className="note-list sidebar-note-list">
-                  {song.notes.map(note => (
-                    <li key={note.id} className="note-item">
-                      <div className="note-item__meta">
-                        <span className="note-item__author">{note.author}</span>
-                        <time className="note-item__time" dateTime={note.createdAt} title={fmtAbsolute(note.createdAt)}>
-                          {timeAgo(note.createdAt)}
-                        </time>
-                        <button
-                          className="btn btn-ghost btn-icon note-item__delete"
-                          type="button"
-                          onClick={() => deleteNote(note.id)}
-                          aria-label="Delete note"
-                          title="Delete note"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                            <path d="M2 3h8M5 3V2h2v1M3 3l.5 7h5L9 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                        </button>
-                      </div>
-                      <p className="note-item__body">{note.body}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-        </div>
-
-        <div className="card sidebar-panel">
-          <button
-            className="sidebar-panel__title sidebar-panel__toggle"
-            type="button"
             onClick={() => togglePanel('Tasks')}
             aria-expanded={!collapsedPanels.has('Tasks')}
           >
@@ -1592,12 +1465,20 @@ export function SongWorkspacePage() {
               <textarea
                 className="textarea lyrics-textarea"
                 value={lyricsDraft}
-                onChange={(e) => setLyricsDraft(e.target.value)}
+                onChange={(e) => {
+                  setLyricsDraft(e.target.value);
+                  setLyricsSaveStatus('idle');
+                }}
                 placeholder={'[Verse 1]\nYour lyrics here...\n\n[Chorus]\nYour chorus here...'}
               />
-              <button className="btn btn-primary btn-sm" type="button" onClick={saveLyrics} disabled={savingLyrics} style={{ alignSelf: 'flex-start' }}>
-                {savingLyrics ? 'Saving...' : 'Save lyrics'}
-              </button>
+              <div className="lyrics-save-row">
+                <button className="btn btn-primary btn-sm" type="button" onClick={saveLyrics} disabled={savingLyrics || !hasLyricsChanges}>
+                  {savingLyrics ? 'Saving...' : 'Save lyrics'}
+                </button>
+                {lyricsSaveStatus === 'saved' && !savingLyrics && (
+                  <span className="lyrics-save-status" role="status" aria-live="polite">Saved</span>
+                )}
+              </div>
             </>
           )}
         </div>

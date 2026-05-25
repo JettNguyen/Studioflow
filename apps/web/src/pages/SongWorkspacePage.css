@@ -130,6 +130,19 @@
   line-height: 1.5;
 }
 
+.lyrics-save-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+}
+
+.lyrics-save-status {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
 /* ── Audio analysis status ── */
 .analysis-status {
   font-size: 12px;
