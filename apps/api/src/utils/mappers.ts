@@ -198,6 +198,8 @@ export function mapProjectDetails(
     driveSyncStatus: mapSyncStatus(project.driveSyncStatus),
     driveFolderId: project.driveFolderId,
     coverImageUrl: project.coverImageKey ? `/api/projects/${project.id}/cover` : null,
+    // Owner's shared ntfy topic; populated by routes that load the owner (else null).
+    ntfyTopic: (project as any).createdBy?.ntfyTopic ?? null,
     songs: project.songs.map(mapSongSummary)
   };
 

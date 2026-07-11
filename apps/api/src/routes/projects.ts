@@ -31,6 +31,7 @@ import {
 
 const CHUNK_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB — keeps each request well under Vercel's 4.5 MB body limit
 import { mapProjectAsset, mapProjectDetails, mapProjectSummary } from '../utils/mappers.js';
+import { getProjectOwnerTopic, isValidNtfyTopic, publishToTopic } from '../utils/ntfy.js';
 
 type RawProjectAsset = {
   id: string;
@@ -281,7 +282,8 @@ projectRouter.get('/:projectId', async (req, res) => {
 
   if (!project) return res.status(404).json({ message: 'Project not found' });
 
-  res.json(mapProjectDetails(project));
+  const owner = await getProjectOwnerTopic(project.id);
+  res.json({ ...mapProjectDetails(project), ntfyTopic: owner?.topic ?? null });
 });
 
 // Update project fields (e.g. title, description, genre)
@@ -339,7 +341,60 @@ projectRouter.patch('/:projectId', async (req, res) => {
 
   if (!project) return res.status(404).json({ message: 'Project not found after update' });
 
-  res.json(mapProjectDetails(project));
+  const owner = await getProjectOwnerTopic(project.id);
+  res.json({ ...mapProjectDetails(project), ntfyTopic: owner?.topic ?? null });
+});
+
+// Set the shared team ntfy topic. Stored on the project owner's account, so it
+// applies to all of that owner's projects. Any project member may change it.
+projectRouter.put('/:projectId/ntfy-topic', async (req, res) => {
+  const projectId = paramToString(req.params.projectId);
+
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId, userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  const raw = (req.body as { ntfyTopic?: unknown }).ntfyTopic;
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  const topic = trimmed.length > 0 ? trimmed : null;
+
+  if (topic && !isValidNtfyTopic(topic)) {
+    return res.status(400).json({ message: 'Topic may only contain letters, numbers, underscores and dashes (max 64 characters).' });
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { createdById: true } });
+  if (!project) return res.status(404).json({ message: 'Project not found' });
+
+  try {
+    await prisma.$executeRawUnsafe(`UPDATE "User" SET "ntfyTopic" = $1 WHERE "id" = $2`, topic, project.createdById);
+  } catch {
+    return res.status(500).json({ message: 'Failed to save notification topic' });
+  }
+
+  res.json({ ntfyTopic: topic });
+});
+
+// Send a test notification to the project's shared topic (any member).
+projectRouter.post('/:projectId/ntfy-topic/test', async (req, res) => {
+  const projectId = paramToString(req.params.projectId);
+
+  const membership = await prisma.projectMembership.findFirst({
+    where: { projectId, userId: req.user!.id }
+  });
+  if (!membership) return res.status(404).json({ message: 'Project not found' });
+
+  const info = await getProjectOwnerTopic(projectId);
+  if (!info?.topic) return res.status(400).json({ message: 'Set a topic before sending a test notification.' });
+
+  const title = [info.artist, info.title].filter(Boolean).join(' - ') || 'StudioFlow';
+  const ok = await publishToTopic(info.topic, 'Test notification — your StudioFlow topic is working!', {
+    title,
+    tags: 'bell'
+  });
+  if (!ok) return res.status(502).json({ message: 'Could not reach ntfy. Check the topic name and try again.' });
+
+  res.json({ ok: true });
 });
 
 // Background Drive sync: called on app load to repair any broken folders.

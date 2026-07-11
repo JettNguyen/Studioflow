@@ -112,6 +112,10 @@ export function ProjectPage() {
   const [editingArtist, setEditingArtist] = useState(false);
   const [artistInput, setArtistInput] = useState('');
   const [savingArtist, setSavingArtist] = useState(false);
+  const [editingTopic, setEditingTopic] = useState(false);
+  const [topicInput, setTopicInput] = useState('');
+  const [savingTopic, setSavingTopic] = useState(false);
+  const [testingTopic, setTestingTopic] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingSongId, setEditingSongId] = useState<string | null>(null);
   const [editingSongTitle, setEditingSongTitle] = useState('');
@@ -334,6 +338,37 @@ export function ProjectPage() {
       addToast(e instanceof Error ? e.message : 'Unable to update artist', 'error');
     } finally {
       setSavingArtist(false);
+    }
+  };
+
+  const saveNtfyTopic = async () => {
+    if (!projectId) return;
+    setSavingTopic(true);
+    try {
+      const res = await apiRequest<{ ntfyTopic: string | null }>(`/projects/${projectId}/ntfy-topic`, {
+        method: 'PUT',
+        body: { ntfyTopic: topicInput.trim() }
+      });
+      setProject(prev => prev ? { ...prev, ntfyTopic: res.ntfyTopic } : prev);
+      setEditingTopic(false);
+      addToast(res.ntfyTopic ? 'Notification topic saved' : 'Notifications turned off');
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Unable to save topic', 'error');
+    } finally {
+      setSavingTopic(false);
+    }
+  };
+
+  const sendTopicTest = async () => {
+    if (!projectId) return;
+    setTestingTopic(true);
+    try {
+      await apiRequest(`/projects/${projectId}/ntfy-topic/test`, { method: 'POST' });
+      addToast('Test notification sent — check the ntfy app');
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Unable to send test', 'error');
+    } finally {
+      setTestingTopic(false);
     }
   };
 
@@ -753,6 +788,56 @@ export function ProjectPage() {
                 <FontAwesomeIcon icon={faCheck} />
               </button>
               <button className="btn btn-ghost btn-icon" onClick={() => setEditingArtist(false)} aria-label="Cancel" disabled={savingArtist}>
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+          )}
+
+          {/* Team notifications (ntfy) inline edit — any member can change it */}
+          {!editingTopic ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, color: 'var(--text-3)' }}>
+                {project.ntfyTopic ? `🔔 ${project.ntfyTopic}` : '🔔 No notification topic'}
+              </span>
+              <button
+                className="btn btn-ghost btn-icon"
+                style={{ padding: '2px 4px' }}
+                onClick={() => { setTopicInput(project.ntfyTopic ?? ''); setEditingTopic(true); }}
+                aria-label="Edit notification topic"
+                title="Edit team notification topic"
+              >
+                <FontAwesomeIcon icon={faPencil} style={{ fontSize: 10 }} />
+              </button>
+              {project.ntfyTopic && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ fontSize: 11, padding: '2px 8px' }}
+                  onClick={sendTopicTest}
+                  disabled={testingTopic}
+                  title="Send a test notification"
+                >
+                  {testingTopic ? 'Sending…' : 'Test'}
+                </button>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                className="input"
+                style={{ fontSize: 13, padding: '3px 8px', height: 28, minWidth: 180 }}
+                value={topicInput}
+                onChange={(e) => setTopicInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') saveNtfyTopic(); if (e.key === 'Escape') setEditingTopic(false); }}
+                placeholder="ntfy topic (letters, numbers, - _)"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                autoFocus
+              />
+              <button className="btn btn-primary btn-icon" onClick={saveNtfyTopic} aria-label="Save topic" disabled={savingTopic}>
+                <FontAwesomeIcon icon={faCheck} />
+              </button>
+              <button className="btn btn-ghost btn-icon" onClick={() => setEditingTopic(false)} aria-label="Cancel" disabled={savingTopic}>
                 <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>

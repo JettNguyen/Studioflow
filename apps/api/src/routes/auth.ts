@@ -25,8 +25,23 @@ import {
   uploadDriveFile
 } from '../utils/drive.js';
 import { mapAuthUser } from '../utils/mappers.js';
+import { isValidNtfyTopic, publishToTopic } from '../utils/ntfy.js';
 
 export const authRouter = Router();
+
+// Read a user's shared ntfy topic via raw SQL so it works even before the
+// Prisma client is regenerated for the `ntfyTopic` column.
+async function readUserNtfyTopic(userId: string): Promise<string | null> {
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ ntfyTopic: string | null }>>(
+      `SELECT "ntfyTopic" FROM "User" WHERE "id" = $1`,
+      userId
+    );
+    return rows[0]?.ntfyTopic ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function isDriveStorageKey(value: string | null | undefined): value is string {
   return typeof value === 'string' && value.startsWith('drive:');
@@ -63,6 +78,43 @@ const loginSchema = z.object({
 
 authRouter.get('/me', (req, res) => {
   res.json({ user: req.user ?? null });
+});
+
+// ── Shared team ntfy topic (stored on this user's account) ──────────────────
+authRouter.get('/me/ntfy-topic', requireAuth, async (req, res) => {
+  const ntfyTopic = await readUserNtfyTopic(req.user!.id);
+  res.json({ ntfyTopic });
+});
+
+authRouter.put('/me/ntfy-topic', requireAuth, async (req, res) => {
+  const raw = (req.body as { ntfyTopic?: unknown }).ntfyTopic;
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  const topic = trimmed.length > 0 ? trimmed : null;
+
+  if (topic && !isValidNtfyTopic(topic)) {
+    return res.status(400).json({ message: 'Topic may only contain letters, numbers, underscores and dashes (max 64 characters).' });
+  }
+
+  try {
+    await prisma.$executeRawUnsafe(`UPDATE "User" SET "ntfyTopic" = $1 WHERE "id" = $2`, topic, req.user!.id);
+  } catch {
+    return res.status(500).json({ message: 'Failed to save notification topic' });
+  }
+
+  res.json({ ntfyTopic: topic });
+});
+
+authRouter.post('/me/ntfy-topic/test', requireAuth, async (req, res) => {
+  const topic = await readUserNtfyTopic(req.user!.id);
+  if (!topic) return res.status(400).json({ message: 'Set a topic before sending a test notification.' });
+
+  const ok = await publishToTopic(topic, 'Test notification — your StudioFlow topic is working!', {
+    title: 'StudioFlow',
+    tags: 'bell'
+  });
+  if (!ok) return res.status(502).json({ message: 'Could not reach ntfy. Check the topic name and try again.' });
+
+  res.json({ ok: true });
 });
 
 authRouter.post('/signup', async (req, res) => {

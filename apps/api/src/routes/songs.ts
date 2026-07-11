@@ -24,6 +24,7 @@ import {
 
 const CHUNK_SIZE_BYTES = 2 * 1024 * 1024;
 import { mapSongWorkspace } from '../utils/mappers.js';
+import { notifySongAudioUploaded } from '../utils/ntfy.js';
 
 export const songRouter = Router();
 const paramToString = (v: string | string[] | undefined) => Array.isArray(v) ? v[0] : (v ?? '');
@@ -655,6 +656,16 @@ songRouter.post('/:songId/assets/upload-chunk', upload.single('file'), async (re
         if (cols.length > 0) await prisma.$executeRawUnsafe(`UPDATE "Song" SET ${cols.join(', ')} WHERE "id" = '${songId}'`);
       }
 
+      // Notify the team's shared ntfy topic on song-audio uploads (and new versions).
+      // Awaited but self-contained (never throws, 3s cap) so it's Vercel-safe.
+      if (prismaCategory === 'SongAudio') {
+        await notifySongAudioUploaded({
+          projectId: song.projectId,
+          songTitle: song.title,
+          isNewVersion: nextVersionNumber > 1
+        });
+      }
+
       const mediaKind = mimeType.startsWith('video/') ? 'video' : mimeType.startsWith('audio/') ? 'audio' : 'other';
       return res.status(201).json({
         id: asset.id, name: asset.name, type: asset.type, category,
@@ -919,6 +930,15 @@ songRouter.post('/:songId/assets', upload.single('file'), async (req, res) => {
         );
       }
     }
+  }
+
+  // Notify the team's shared ntfy topic on song-audio uploads (and new versions).
+  if (prismaCategory === 'SongAudio') {
+    await notifySongAudioUploaded({
+      projectId: song.projectId,
+      songTitle: song.title,
+      isNewVersion: nextVersionNumber > 1
+    });
   }
 
   const mediaKind = asset.type.startsWith('video/')

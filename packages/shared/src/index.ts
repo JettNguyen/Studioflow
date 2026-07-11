@@ -87,6 +87,8 @@ export interface ProjectDetails {
   driveSyncStatus: ProjectSyncStatus;
   driveFolderId: string | null;
   coverImageUrl: string | null;
+  /** Shared team ntfy topic (stored on the project owner's account). */
+  ntfyTopic: string | null;
   songs: SongSummary[];
 }
 

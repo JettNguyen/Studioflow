@@ -15,6 +15,10 @@ export function ProfilePage() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [ntfyTopic, setNtfyTopic] = useState('');
+  const [savingTopic, setSavingTopic] = useState(false);
+  const [testingTopic, setTestingTopic] = useState(false);
+  const [topicStatus, setTopicStatus] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
     apiRequest<DriveConnectionStatus>('/auth/drive-status')
@@ -24,6 +28,10 @@ export function ProfilePage() {
 
     apiRequest<ProjectSummary[]>('/projects')
       .then(setProjects)
+      .catch(() => {/* non-critical */});
+
+    apiRequest<{ ntfyTopic: string | null }>('/auth/me/ntfy-topic')
+      .then(r => setNtfyTopic(r.ntfyTopic ?? ''))
       .catch(() => {/* non-critical */});
   }, []);
 
@@ -86,6 +94,36 @@ export function ProfilePage() {
       setAvatarError(err instanceof Error ? err.message : 'Failed to remove photo');
     } finally {
       setAvatarUploading(false);
+    }
+  };
+
+  const saveNtfyTopic = async () => {
+    setSavingTopic(true);
+    setTopicStatus(null);
+    try {
+      const res = await apiRequest<{ ntfyTopic: string | null }>('/auth/me/ntfy-topic', {
+        method: 'PUT',
+        body: { ntfyTopic: ntfyTopic.trim() }
+      });
+      setNtfyTopic(res.ntfyTopic ?? '');
+      setTopicStatus({ kind: 'ok', text: res.ntfyTopic ? 'Topic saved.' : 'Notifications turned off.' });
+    } catch (err) {
+      setTopicStatus({ kind: 'err', text: err instanceof Error ? err.message : 'Failed to save topic' });
+    } finally {
+      setSavingTopic(false);
+    }
+  };
+
+  const sendTestNotification = async () => {
+    setTestingTopic(true);
+    setTopicStatus(null);
+    try {
+      await apiRequest('/auth/me/ntfy-topic/test', { method: 'POST' });
+      setTopicStatus({ kind: 'ok', text: 'Test sent — check the ntfy app.' });
+    } catch (err) {
+      setTopicStatus({ kind: 'err', text: err instanceof Error ? err.message : 'Failed to send test' });
+    } finally {
+      setTestingTopic(false);
     }
   };
 
@@ -244,6 +282,52 @@ export function ProfilePage() {
         )}
           </>
         )}
+      </div>
+
+      {/* ── Notifications ── */}
+      <div className="card profile-section">
+        <div className="profile-section__header">
+          <div>
+            <h3>Notifications</h3>
+            <p>Push to your team's ntfy topic when song audio is uploaded to your projects.</p>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
+          <input
+            className="input"
+            style={{ flex: 1, minWidth: 200 }}
+            value={ntfyTopic}
+            onChange={e => setNtfyTopic(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') saveNtfyTopic(); }}
+            placeholder="e.g. studioflow-myband-9f3k2p"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <button className="btn btn-primary btn-sm" onClick={saveNtfyTopic} disabled={savingTopic}>
+            {savingTopic ? 'Saving…' : 'Save'}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={sendTestNotification} disabled={testingTopic || !ntfyTopic.trim()}>
+            {testingTopic ? 'Sending…' : 'Send test'}
+          </button>
+        </div>
+
+        {topicStatus && (
+          <p
+            className={topicStatus.kind === 'err' ? 'form-error' : undefined}
+            style={{ marginTop: 10, fontSize: 13, ...(topicStatus.kind === 'ok' ? { color: 'var(--text-3)' } : {}) }}
+          >
+            {topicStatus.text}
+          </p>
+        )}
+
+        <p style={{ marginTop: 10, fontSize: 12, color: 'var(--text-3)' }}>
+          Your whole team subscribes to this topic in the{' '}
+          <a href="https://ntfy.sh" target="_blank" rel="noreferrer">ntfy</a> app
+          {ntfyTopic.trim() ? <> (subscribe to <code>ntfy.sh/{ntfyTopic.trim()}</code>)</> : null}.
+          Topics on ntfy.sh are public, so pick a long, hard-to-guess name.
+        </p>
       </div>
 
       {/* ── Danger zone ── */}
