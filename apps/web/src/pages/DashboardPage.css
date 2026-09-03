@@ -1,20 +1,22 @@
 .dashboard-create {
-  margin-bottom: 30px;
+  margin-bottom: 36px;
 }
 
 .dashboard-create__title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-2);
+  color: var(--text-3);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
   margin-bottom: 10px;
 }
 
 .project-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 15px;
+  gap: 16px;
+  /* Cards with cover art are much taller; don't stretch the others to match */
+  align-items: start;
 }
 
 /* Wrapper needed for cover + card stacking */
@@ -24,7 +26,12 @@
   border-radius: var(--r-4);
   overflow: hidden;
   border: 1px solid var(--border);
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s, opacity 0.2s;
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur-slow) var(--ease),
+    transform var(--dur-slow) var(--ease),
+    opacity var(--dur) var(--ease);
   position: relative;
   cursor: grab;
 }
@@ -32,7 +39,27 @@
 .project-card-wrap:hover {
   border-color: var(--border-mid);
   box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+}
+
+/* Press: settle back down so the tap reads as a click, not a lift */
+.project-card-wrap:active {
+  transform: translateY(0) scale(0.995);
+  box-shadow: var(--shadow-sm);
+  transition-duration: 60ms;
+}
+
+@media (hover: none) {
+  .project-card-wrap:hover {
+    border-color: var(--border);
+    box-shadow: var(--shadow-sm);
+    transform: none;
+  }
+
+  .project-card-wrap:active {
+    background: var(--surface-hover);
+    border-color: var(--border-mid);
+  }
 }
 
 .project-card-wrap.dragging {
@@ -64,26 +91,47 @@
   opacity: 1;
 }
 
-/* Cover image — square banner at top of card */
+/* Cover image — square banner at top of card. The art is shown whole
+   (contain), with a blurred copy of itself filling the frame behind, so a
+   wide logo or banner isn't cropped into a square. */
 .project-card__cover {
+  position: relative;
   width: 100%;
   aspect-ratio: 1 / 1;
   overflow: hidden;
-  background: #111;
+  background: #0e0e10;
   flex-shrink: 0;
   display: block;
 }
 
+.project-card__cover-bg {
+  position: absolute;
+  inset: -12%;
+  width: 124%;
+  height: 124%;
+  object-fit: cover;
+  filter: blur(28px) saturate(1.3) brightness(0.55);
+  transform: scale(1.1);
+  pointer-events: none;
+}
+
 .project-card__cover-img {
+  position: relative;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
-  transition: transform 0.3s ease;
+  transition: transform var(--dur-slow) var(--ease);
 }
 
 .project-card-wrap:hover .project-card__cover-img {
   transform: scale(1.03);
+}
+
+@media (hover: none) {
+  .project-card-wrap:hover .project-card__cover-img {
+    transform: none;
+  }
 }
 
 /* Small square thumbnail shown inline next to the title */
@@ -111,6 +159,15 @@
   /* border/radius/hover handled by wrapper */
   border: none;
   border-radius: 0;
+  transition: background-color var(--dur) var(--ease);
+}
+
+.project-card-wrap:hover .project-card {
+  background: var(--surface-raised);
+}
+
+.project-card:active {
+  opacity: 1;
 }
 
 
@@ -139,9 +196,10 @@
 }
 
 .project-card__title {
-  font-size: 20px;
+  font-size: 19px;
   margin: 0;
   font-weight: 600;
+  letter-spacing: 0;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -150,7 +208,7 @@
 }
 
 .project-card__collab {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-3);
 }
 
@@ -177,8 +235,13 @@
   transform: translateY(-1px);
 }
 
+.project-card__upload-btn:active {
+  transform: translateY(0) scale(0.95);
+}
+
 .project-card p {
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--text-2);
   flex: 1;
   display: -webkit-box;
@@ -190,16 +253,17 @@
 
 .project-card__footer {
   display: flex;
-  gap: 15px;
+  gap: 14px;
   align-items: center;
-  padding-top: 10px;
+  padding-top: 12px;
   margin-top: auto;
   border-top: 1px solid var(--border);
 }
 
 .project-card__stat {
-  font-size: 11px;
-  color: var(--text-2);
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
 }
 
 .project-card-wrap.project-card--skeleton {
@@ -214,7 +278,7 @@
 @media (max-width: 600px) {
   .project-grid {
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: 12px;
   }
 
   .dashboard-create .form-row {

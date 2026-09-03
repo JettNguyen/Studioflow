@@ -2,8 +2,8 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px;
-  background: rgba(0, 0, 0, 0.22);
+  padding: 10px 12px;
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--r-2);
 }
@@ -16,8 +16,8 @@
 }
 
 .wfp-btn {
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: var(--accent);
   border: none;
@@ -27,7 +27,8 @@
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background-color 0.2s, transform 0.2s;
+  box-shadow: 0 2px 8px rgba(59, 142, 230, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  transition: background-color var(--dur) var(--ease), transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
   padding: 0;
   padding-left: 1px; /* optical centering for play triangle */
 }
@@ -39,6 +40,21 @@
 .wfp-btn:hover:not(:disabled) {
   background: var(--accent-hover);
   transform: scale(1.06);
+}
+
+.wfp-btn:active:not(:disabled) {
+  background: var(--accent-active);
+  transform: scale(0.94);
+  box-shadow: none;
+  opacity: 1;
+  transition-duration: 60ms;
+}
+
+@media (hover: none) {
+  .wfp-btn:hover:not(:disabled) {
+    background: var(--accent);
+    transform: none;
+  }
 }
 
 .wfp-btn:disabled {
@@ -66,8 +82,21 @@
 }
 
 .wfp-skip-btn:hover:not(:disabled) {
-  color: var(--text-2);
+  color: var(--text);
   transform: scale(1.1);
+}
+
+.wfp-skip-btn:active:not(:disabled) {
+  color: var(--text);
+  transform: scale(0.9);
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .wfp-skip-btn {
+    width: 32px;
+    height: 32px;
+  }
 }
 
 .wfp-skip-btn:disabled {
@@ -106,7 +135,7 @@
   align-items: center;
   justify-content: space-between;
   /* Indent to align under the waveform (past the play button + gap) */
-  padding-left: 40px;
+  padding-left: 44px;
 }
 
 .wfp-volume {

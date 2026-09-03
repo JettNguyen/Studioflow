@@ -47,6 +47,12 @@ function ProjectCard({
         <div className="project-card__cover">
           <img
             src={resolveApiUrl(project.coverImageUrl)}
+            alt=""
+            aria-hidden="true"
+            className="project-card__cover-bg"
+          />
+          <img
+            src={resolveApiUrl(project.coverImageUrl)}
             alt={`${project.title} cover`}
             className="project-card__cover-img"
           />

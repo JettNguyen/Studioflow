@@ -18,14 +18,39 @@
   border: 1px solid var(--border-mid);
   border-radius: var(--r-2);
   flex-shrink: 0;
-  transition: color 0.2s, border-color 0.2s, background-color 0.2s;
-  min-height: 35px;
+  transition:
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    background-color var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+  min-height: 34px;
 }
 
 .bc-back:hover {
   color: var(--text);
   border-color: var(--border-strong);
   background: var(--surface-hover);
+}
+
+.bc-back:active {
+  transform: scale(0.97);
+  background: var(--surface-active);
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .bc-back:hover {
+    color: var(--text-2);
+    border-color: var(--border-mid);
+    background: transparent;
+  }
+}
+
+@media (pointer: coarse) {
+  .bc-back {
+    min-height: 38px;
+    padding: 5px 12px;
+  }
 }
 
 .bc-back svg {
@@ -80,6 +105,10 @@
 
 .bc-trail a:hover {
   color: var(--text);
+}
+
+.bc-trail a:active {
+  color: var(--accent-text);
 }
 
 .bc-trail__sep {

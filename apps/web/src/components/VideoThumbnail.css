@@ -43,6 +43,24 @@
   background: rgba(0, 0, 0, 0.25);
 }
 
+.vthumb--clickable:active .vthumb__overlay--ready {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.vthumb--clickable:active .vthumb__play {
+  transform: scale(0.95);
+}
+
+@media (hover: none) {
+  .vthumb--clickable:hover .vthumb__overlay--ready {
+    background: rgba(0, 0, 0, 0);
+  }
+
+  .vthumb--clickable:hover .vthumb__play {
+    transform: scale(0.9);
+  }
+}
+
 .vthumb__play {
   transform: scale(0.9);
   transition: transform 0.2s;

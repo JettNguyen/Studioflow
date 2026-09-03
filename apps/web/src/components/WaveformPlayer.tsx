@@ -83,7 +83,7 @@ export function WaveformPlayer({ src, trackTitle, trackSubtitle, trackArtist, ar
         if (v > mx) mx = v;
       }
       const h = Math.max(1.5, Math.abs(mx - mn) * mid * 0.9);
-      ctx.fillStyle = i < playedCount ? 'rgba(117,160,245,0.88)' : 'rgba(117,160,245,0.26)';
+      ctx.fillStyle = i < playedCount ? 'rgba(77,155,238,0.95)' : 'rgba(77,155,238,0.28)';
       ctx.fillRect(i * (barW + gap), mid - h, barW, h * 2);
     }
 
