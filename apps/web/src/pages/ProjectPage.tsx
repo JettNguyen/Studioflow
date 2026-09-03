@@ -9,6 +9,7 @@ import { useToast } from '../context/ToastContext';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { WaveformPlayer } from '../components/WaveformPlayer';
+import { NoteList } from '../components/NoteList';
 import './ProjectPage.css';
 
 async function compressImage(file: File, maxDim = 1200, quality = 0.82): Promise<File> {
@@ -151,6 +152,7 @@ export function ProjectPage() {
   // Notes + overflow menu for project assets
   const [openAssetNotes, setOpenAssetNotes] = useState<Set<string>>(new Set());
   const [assetNoteDrafts, setAssetNoteDrafts] = useState<Record<string, string>>({});
+  const [savingNoteAssetId, setSavingNoteAssetId] = useState<string | null>(null);
   const [openOverflowId, setOpenOverflowId] = useState<string | null>(null);
   const [openOverflowAlign, setOpenOverflowAlign] = useState<'left' | 'right'>('right');
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
@@ -560,6 +562,7 @@ export function ProjectPage() {
   const addProjectAssetNote = async (assetId: string) => {
     const body = (assetNoteDrafts[assetId] ?? '').trim();
     if (!body || !projectId) return;
+    setSavingNoteAssetId(assetId);
     try {
       const note = await apiRequest<ProjectAssetNote>(
         `/projects/${projectId}/assets/${assetId}/notes`,
@@ -572,6 +575,8 @@ export function ProjectPage() {
       addToast('Note added');
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Failed to add note', 'error');
+    } finally {
+      setSavingNoteAssetId(null);
     }
   };
 
@@ -1294,44 +1299,18 @@ export function ProjectPage() {
                     )}
                     {openAssetNotes.has(asset.id) && (
                       <div className="asset-notes-area">
-                        {asset.notes.map((note) => (
-                          <div key={note.id} className="asset-note">
-                            <div className="asset-note__header">
-                              <span className="asset-note__author">{note.author}</span>
-                              <span className="asset-note__date">{new Date(note.createdAt).toLocaleString()}</span>
-                              <button
-                                className="btn btn-ghost btn-icon asset-note__delete"
-                                type="button"
-                                onClick={() => deleteProjectAssetNote(asset.id, note.id)}
-                                aria-label="Delete note"
-                                title="Delete note"
-                              >
-                                <FontAwesomeIcon icon={faTrash} />
-                              </button>
-                            </div>
-                            <p className="asset-note__body">{note.body}</p>
-                          </div>
-                        ))}
-
-                        <div className="asset-note-form">
-                          <textarea
-                            className="input asset-note-input"
-                            rows={2}
-                            placeholder="Add a note..."
-                            value={assetNoteDrafts[asset.id] ?? ''}
-                            onChange={(e) => setAssetNoteDrafts((prev) => ({ ...prev, [asset.id]: e.target.value }))}
-                          />
-                          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                            <button
-                              className="btn btn-primary btn-sm"
-                              type="button"
-                              disabled={!(assetNoteDrafts[asset.id] ?? '').trim()}
-                              onClick={() => addProjectAssetNote(asset.id)}
-                            >
-                              Add note
-                            </button>
-                          </div>
-                        </div>
+                        <NoteList
+                          notes={asset.notes}
+                          draft={assetNoteDrafts[asset.id] ?? ''}
+                          onDraftChange={(value) =>
+                            setAssetNoteDrafts((prev) => ({ ...prev, [asset.id]: value }))
+                          }
+                          onAdd={() => addProjectAssetNote(asset.id)}
+                          onDelete={(noteId) => deleteProjectAssetNote(asset.id, noteId)}
+                          placeholder="Add a note…"
+                          emptyLabel="No notes on this file yet."
+                          busy={savingNoteAssetId === asset.id}
+                        />
                       </div>
                     )}
                     {isPreviewing && (

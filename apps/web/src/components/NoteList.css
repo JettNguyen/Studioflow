@@ -1,0 +1,211 @@
+/* ============================================================
+   NOTE LIST — shared by song assets, project assets and songs
+   ============================================================ */
+.note-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* ── Toggle + open container ───────────────────────────────────────────────
+   Shared by song assets and project assets. Both page stylesheets are loaded
+   globally, so these have to live in exactly one place. */
+.asset-notes-toggle {
+  position: relative;
+}
+
+.asset-notes-toggle.active {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.asset-notes-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.asset-notes-area {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: notes-reveal 0.18s ease-out;
+}
+
+@keyframes notes-reveal {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ── Composer ── */
+.note-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note-composer__input {
+  min-height: 60px;
+  max-height: 40vh;
+  overflow-y: auto;
+  resize: none;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.note-composer__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.note-composer__hint {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-right: auto;
+}
+
+/* No modifier-key hint where there is no keyboard */
+@media (pointer: coarse) {
+  .note-composer__hint {
+    display: none;
+  }
+
+  .note-composer__actions .btn-sm {
+    padding: 0 20px;
+    font-size: 13px;
+  }
+}
+
+/* ── List ── */
+.note-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note-list__empty {
+  font-size: 13px;
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.note-item {
+  padding: 10px 12px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.note-item__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.note-item__author {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-item__time {
+  font-size: 11px;
+  color: var(--text-3);
+  flex-shrink: 0;
+  cursor: default;
+}
+
+.note-item__body {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-2);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-item__body--clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.note-item__more {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.note-item__more:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.note-item__more:active {
+  opacity: 0.7;
+}
+
+@media (pointer: coarse) {
+  .note-item__more {
+    min-height: 32px;
+    padding: 6px 0;
+  }
+}
+
+.note-item__delete {
+  opacity: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+
+.note-item:hover .note-item__delete,
+.note-item:focus-within .note-item__delete {
+  opacity: 1;
+}
+
+/* Hover can't be relied on for touch — keep the control visible there. */
+@media (pointer: coarse) {
+  .note-item__delete {
+    opacity: 0.6;
+  }
+}
+
+.note-item__delete:focus-visible {
+  opacity: 1;
+}

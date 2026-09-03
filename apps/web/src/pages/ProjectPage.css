@@ -40,6 +40,11 @@
   background: var(--surface-hover);
 }
 
+.project-cover-btn:active:not(:disabled) {
+  transform: scale(0.96);
+  opacity: 1;
+}
+
 .project-cover-btn:disabled {
   cursor: wait;
 }
@@ -47,7 +52,8 @@
 .project-cover-thumb {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  background: #0e0e10;
   display: block;
   border-radius: var(--r-3);
 }
@@ -142,13 +148,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 15px 20px;
+  padding: 16px 20px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-3);
+  box-shadow: var(--shadow-sm);
   text-decoration: none;
-  transition: border-color 0.2s, background-color 0.2s;
-  gap: 10px;
+  transition:
+    border-color var(--dur) var(--ease),
+    background-color var(--dur) var(--ease),
+    transform var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+  gap: 12px;
   /* Required so this flex child can shrink below its content's natural width,
      which lets the inner h3 truncation (overflow: hidden + text-overflow: ellipsis)
      actually fire when song titles are long. */
@@ -162,6 +173,30 @@
 .song-row:hover {
   border-color: var(--border-mid);
   background: var(--surface-raised);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.song-row:active {
+  transform: translateY(0);
+  background: var(--surface-hover);
+  box-shadow: var(--shadow-sm);
+  opacity: 1;
+  transition-duration: 60ms;
+}
+
+@media (hover: none) {
+  .song-row:hover {
+    border-color: var(--border);
+    background: var(--surface);
+    transform: none;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .song-row:active {
+    background: var(--surface-hover);
+    border-color: var(--border-mid);
+  }
 }
 
 .song-row__main {
@@ -170,13 +205,12 @@
 }
 
 .song-row__main h3 {
-  font-size: 14px;
+  font-size: 15px;
   margin-bottom: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
 
 .song-row__stats {
   display: flex;
@@ -330,10 +364,23 @@
   transition: background-color 0.15s, border-color 0.15s;
 }
 
+/* The row itself has no horizontal padding — inset the notes panel to match
+   .misc-asset-row__main instead of running flush to the card edge. */
+.misc-asset-row .asset-notes-area {
+  padding: 10px 10px 12px;
+}
+
 .misc-asset-row:hover,
 .misc-asset-row--previewing {
   background: var(--surface-raised);
   border-color: var(--border);
+}
+
+@media (hover: none) {
+  .misc-asset-row:hover:not(.misc-asset-row--previewing) {
+    background: transparent;
+    border-color: transparent;
+  }
 }
 
 .misc-asset-row__main {
@@ -465,6 +512,17 @@
 
 .misc-folder__header:hover {
   background: var(--surface-hover);
+}
+
+.misc-folder__header:active {
+  background: var(--surface-active);
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .misc-folder__header:hover {
+    background: transparent;
+  }
 }
 
 .misc-folder__chevron {
@@ -617,30 +675,14 @@
 
 /* Active state for the preview toggle button */
 .btn-ghost--active {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-text);
+  background: var(--accent-subtle);
+  border-color: rgba(59, 142, 230, 0.3);
 }
 
-/* ── Notes toggle + badge ── */
-.asset-notes-toggle {
-  position: relative;
-}
-
-.asset-notes-badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  border-radius: 9px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 14px;
-  text-align: center;
-  pointer-events: none;
+.btn-ghost--active:hover {
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent-subtle) 100%, var(--accent) 8%);
 }
 
 /* ── 3-dots overflow menu ── */
@@ -714,81 +756,5 @@
 
 .asset-overflow__item--danger:hover {
   background: var(--red-subtle);
-}
-
-/* ── Asset notes area ── */
-.asset-notes-area {
-  padding: 8px 12px 10px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.asset-note {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 6px 8px;
-  background: var(--surface-raised);
-  border-radius: var(--r-2);
-}
-
-.asset-note__header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.asset-note__author {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.asset-note__date {
-  font-size: 11px;
-  color: var(--text-3);
-}
-
-.asset-note__delete {
-  margin-left: auto;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.asset-note:hover .asset-note__delete {
-  opacity: 1;
-}
-
-/* Always show delete on touch devices and for keyboard focus */
-@media (pointer: coarse) {
-  .asset-note__delete {
-    opacity: 0.5;
-  }
-}
-
-.asset-note__delete:focus-visible {
-  opacity: 1;
-}
-
-.asset-note__body {
-  font-size: 13px;
-  color: var(--text-2);
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.asset-note-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.asset-note-input {
-  resize: none;
-  font-size: 13px;
-  line-height: 1.4;
 }
 

@@ -1,8 +1,10 @@
 import type {
   AssetCategory,
   CreateAssetNoteRequest,
+  CreateNoteRequest,
   CreateTaskRequest,
   SongAsset,
+  SongNote,
   SongTaskStatus,
   SongWorkspace,
   UpdateTaskStatusRequest
@@ -12,7 +14,10 @@ import { useParams } from 'react-router-dom';
 import { apiRequest, uploadChunkedWithProgress, resolveApiUrl } from '../lib/api';
 import { analyzeAudioFile, type AudioFeatures } from '../lib/audioAnalysis';
 import { useDropZone } from '../context/DropZoneContext';
+import { useToast } from '../context/ToastContext';
+import { fmtAbsolute, timeAgo } from '../lib/format';
 import { Breadcrumb } from '../components/Breadcrumb';
+import { NoteList } from '../components/NoteList';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { WaveformPlayer } from '../components/WaveformPlayer';
 import { VideoThumbnail } from '../components/VideoThumbnail';
@@ -44,24 +49,6 @@ function fmtType(type: string): string {
   return type;
 }
 
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  const hrs = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  if (hrs < 24) return `${hrs}h ago`;
-  if (days < 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function fmtAbsolute(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
-  });
-}
-
 async function readFileDuration(file: File): Promise<string | null> {
   const kind = file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : null;
   if (!kind) return null;
@@ -90,6 +77,7 @@ async function readFileDuration(file: File): Promise<string | null> {
 
 export function SongWorkspacePage() {
   const { projectId, songId } = useParams();
+  const { addToast } = useToast();
   const [song, setSong] = useState<SongWorkspaceWithLyrics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -117,6 +105,8 @@ export function SongWorkspacePage() {
   const [editBpm, setEditBpm] = useState('');
 
   // Notes + tasks
+  const [songNoteDraft, setSongNoteDraft] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
   const [taskTitle, setTaskTitle] = useState('');
   const [lyricsDraft, setLyricsDraft] = useState('');
   const [savingLyrics, setSavingLyrics] = useState(false);
@@ -135,7 +125,7 @@ export function SongWorkspacePage() {
 
   // Collapsible sidebar panels — all start collapsed
   const [collapsedPanels, setCollapsedPanels] = useState<Set<string>>(
-    new Set(['Tasks', 'Lyrics'])
+    new Set(['Notes', 'Tasks', 'Lyrics'])
   );
   const togglePanel = (panel: string) =>
     setCollapsedPanels(prev => {
@@ -146,6 +136,7 @@ export function SongWorkspacePage() {
 
   // Per-asset notes
   const [assetNoteDrafts, setAssetNoteDrafts] = useState<Record<string, string>>({});
+  const [savingAssetNoteId, setSavingAssetNoteId] = useState<string | null>(null);
   const [openAssetNotes, setOpenAssetNotes] = useState<Set<string>>(new Set());
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [editAssetName, setEditAssetName] = useState('');
@@ -442,13 +433,48 @@ export function SongWorkspacePage() {
   const addAssetNote = async (asset: SongAsset) => {
     const body = (assetNoteDrafts[asset.id] ?? '').trim();
     if (!body || !song) return;
+    setSavingAssetNoteId(asset.id);
     try {
       const note = await apiRequest<SongAsset['notes'][number]>(`/assets/${asset.id}/notes`, {
         method: 'POST', body: { body } satisfies CreateAssetNoteRequest
       });
       setSong({ ...song, assets: song.assets.map(a => a.id === asset.id ? { ...a, notes: [note, ...a.notes] } : a) });
       setAssetNoteDrafts(d => ({ ...d, [asset.id]: '' }));
-    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to add note'); }
+      addToast('Note added');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to add note', 'error');
+    } finally {
+      setSavingAssetNoteId(null);
+    }
+  };
+
+  const addSongNote = async () => {
+    const body = songNoteDraft.trim();
+    if (!body || !songId || !song) return;
+    setSavingNote(true);
+    try {
+      const note = await apiRequest<SongNote>(`/songs/${songId}/notes`, {
+        method: 'POST', body: { body } satisfies CreateNoteRequest
+      });
+      setSong({ ...song, notes: [note, ...song.notes] });
+      setSongNoteDraft('');
+      addToast('Note added');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to add note', 'error');
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const deleteSongNote = async (noteId: string) => {
+    if (!songId || !song) return;
+    try {
+      await apiRequest(`/songs/${songId}/notes/${noteId}`, { method: 'DELETE' });
+      setSong({ ...song, notes: song.notes.filter(n => n.id !== noteId) });
+      addToast('Note deleted');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to delete note', 'error');
+    }
   };
 
   const deleteAssetNote = async (assetId: string, noteId: string) => {
@@ -456,7 +482,10 @@ export function SongWorkspacePage() {
     try {
       await apiRequest(`/assets/${assetId}/notes/${noteId}`, { method: 'DELETE' });
       setSong({ ...song, assets: song.assets.map(a => a.id === assetId ? { ...a, notes: a.notes.filter(n => n.id !== noteId) } : a) });
-    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to delete note'); }
+      addToast('Note deleted');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to delete note', 'error');
+    }
   };
 
   const saveShotList = async () => {
@@ -546,14 +575,12 @@ export function SongWorkspacePage() {
   };
 
   const renderVersionedCard = (
-    category: AssetCategory,
     composedKey: string,
     group: { groupKey: string; versions: SongAsset[] }
   ) => {
     const selectedId = selectedVersionByGroup[composedKey] || group.versions[0].id;
     const asset = group.versions.find(v => v.id === selectedId) || group.versions[0];
     const notesOpen = openAssetNotes.has(asset.id);
-    const canManageNotes = category === 'Song Audio';
     const metaTags = renderMetaTags(asset);
     const isImage = asset.mediaKind === 'other' && asset.type.startsWith('image/');
 
@@ -648,20 +675,19 @@ export function SongWorkspacePage() {
               </svg>
             </button>
           )}
-          {canManageNotes && (
-            <button
-              className={`btn btn-ghost btn-icon asset-notes-toggle${notesOpen ? ' active' : ''}`}
-              type="button"
-              onClick={() => toggleAssetNotes(asset.id)}
-              aria-label={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
-              title={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
-            >
-              {asset.notes.length > 0 && <span className="asset-notes-badge">{asset.notes.length}</span>}
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <path d="M2 2.5h8v5.5H5l-2.5 2v-2H2v-5.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-              </svg>
-            </button>
-          )}
+          <button
+            className={`btn btn-ghost btn-icon asset-notes-toggle${notesOpen ? ' active' : ''}`}
+            type="button"
+            onClick={() => toggleAssetNotes(asset.id)}
+            aria-expanded={notesOpen}
+            aria-label={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
+            title={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
+          >
+            {asset.notes.length > 0 && <span className="asset-notes-badge">{asset.notes.length}</span>}
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M2 2.5h8v5.5H5l-2.5 2v-2H2v-5.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+            </svg>
+          </button>
           {/* Overflow (3-dots) menu */}
           <div className="asset-overflow" onClick={(event) => event.stopPropagation()}>
             <button
@@ -775,51 +801,18 @@ export function SongWorkspacePage() {
         )}
 
         {/* Collapsible notes */}
-        {canManageNotes && notesOpen && (
+        {notesOpen && (
           <div className="asset-notes-area">
-            <div className="form-stack">
-              <textarea
-                className="textarea"
-                value={assetNoteDrafts[asset.id] ?? ''}
-                onChange={e => setAssetNoteDrafts(d => ({ ...d, [asset.id]: e.target.value }))}
-                placeholder="Notes for this version..."
-                style={{ minHeight: '60px' }}
-              />
-              <button
-                className="btn btn-ghost btn-sm"
-                type="button"
-                style={{ alignSelf: 'flex-start' }}
-                onClick={() => addAssetNote(asset)}
-              >
-                Add note
-              </button>
-            </div>
-            {asset.notes.length > 0 && (
-              <ul className="note-list">
-                {asset.notes.map(note => (
-                  <li key={note.id} className="note-item">
-                    <div className="note-item__meta">
-                      <span className="note-item__author">{note.author}</span>
-                      <time className="note-item__time" dateTime={note.createdAt} title={fmtAbsolute(note.createdAt)}>
-                        {timeAgo(note.createdAt)}
-                      </time>
-                      <button
-                        className="btn btn-ghost btn-icon note-item__delete"
-                        type="button"
-                        onClick={() => deleteAssetNote(asset.id, note.id)}
-                        aria-label="Delete note"
-                        title="Delete note"
-                      >
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                          <path d="M2 3h8M5 3V2h2v1M3 3l.5 7h5L9 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      </button>
-                    </div>
-                    <p className="note-item__body">{note.body}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <NoteList
+              notes={asset.notes}
+              draft={assetNoteDrafts[asset.id] ?? ''}
+              onDraftChange={value => setAssetNoteDrafts(d => ({ ...d, [asset.id]: value }))}
+              onAdd={() => addAssetNote(asset)}
+              onDelete={noteId => deleteAssetNote(asset.id, noteId)}
+              placeholder="Notes for this version…"
+              emptyLabel="No notes on this version yet."
+              busy={savingAssetNoteId === asset.id}
+            />
           </div>
         )}
       </div>
@@ -894,7 +887,24 @@ export function SongWorkspacePage() {
 
         {/* Song header */}
         <div className="song-header">
-          <div>
+          <div className="song-header__identity">
+            {song.projectCoverImageUrl ? (
+              <img
+                className="song-header__cover"
+                src={resolveApiUrl(song.projectCoverImageUrl)}
+                alt=""
+                loading="lazy"
+              />
+            ) : (
+              <div className="song-header__cover song-header__cover--empty" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M9 18V6l11-2v12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                  <circle cx="6.5" cy="18" r="2.5" stroke="currentColor" strokeWidth="1.6"/>
+                  <circle cx="17.5" cy="16" r="2.5" stroke="currentColor" strokeWidth="1.6"/>
+                </svg>
+              </div>
+            )}
+          <div className="song-header__text">
             <h2>{song.title}</h2>
 
             {/* Key / BPM — view mode */}
@@ -943,7 +953,8 @@ export function SongWorkspacePage() {
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          </div>
+          <div className="song-header__actions">
             <button
               className={`btn btn-ghost btn-sm ${song.released ? 'released' : ''}`}
               type="button"
@@ -1111,6 +1122,7 @@ export function SongWorkspacePage() {
                   {!isCollapsed && <div className="smc-list">
                     {smcAssets.map(asset => {
                       const isImg = asset.mediaKind === 'other' && asset.type.startsWith('image/');
+                      const smcNotesOpen = openAssetNotes.has(asset.id);
                       return (
                         <div key={asset.id} className="smc-row">
                           <div className="smc-row__main">
@@ -1158,6 +1170,19 @@ export function SongWorkspacePage() {
                                   </svg>
                                 </button>
                               )}
+                              <button
+                                className={`btn btn-ghost btn-icon asset-notes-toggle${smcNotesOpen ? ' active' : ''}`}
+                                type="button"
+                                onClick={() => toggleAssetNotes(asset.id)}
+                                aria-expanded={smcNotesOpen}
+                                aria-label={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
+                                title={asset.notes.length > 0 ? `Notes (${asset.notes.length})` : 'Notes'}
+                              >
+                                {asset.notes.length > 0 && <span className="asset-notes-badge">{asset.notes.length}</span>}
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                  <path d="M2 2.5h8v5.5H5l-2.5 2v-2H2v-5.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                                </svg>
+                              </button>
                               {/* Overflow (3-dots) menu */}
                               <div className="asset-overflow" onClick={(event) => event.stopPropagation()}>
                                 <button
@@ -1271,6 +1296,21 @@ export function SongWorkspacePage() {
                             </div>
                           )}
 
+                          {smcNotesOpen && (
+                            <div className="asset-notes-area">
+                              <NoteList
+                                notes={asset.notes}
+                                draft={assetNoteDrafts[asset.id] ?? ''}
+                                onDraftChange={value => setAssetNoteDrafts(d => ({ ...d, [asset.id]: value }))}
+                                onAdd={() => addAssetNote(asset)}
+                                onDelete={noteId => deleteAssetNote(asset.id, noteId)}
+                                placeholder="Notes for this clip…"
+                                emptyLabel="No notes on this clip yet."
+                                busy={savingAssetNoteId === asset.id}
+                              />
+                            </div>
+                          )}
+
                         </div>
                       );
                     })}
@@ -1298,7 +1338,7 @@ export function SongWorkspacePage() {
                 </button>
                 {!isCollapsed && (
                   <div className="asset-grid">
-                    {section.groups.map(group => renderVersionedCard(category, `${category}::${group.groupKey}`, group))}
+                    {section.groups.map(group => renderVersionedCard(`${category}::${group.groupKey}`, group))}
                   </div>
                 )}
               </div>
@@ -1392,6 +1432,33 @@ export function SongWorkspacePage() {
           <button
             className="sidebar-panel__title sidebar-panel__toggle"
             type="button"
+            onClick={() => togglePanel('Notes')}
+            aria-expanded={!collapsedPanels.has('Notes')}
+          >
+            <svg className={`asset-section__chevron${collapsedPanels.has('Notes') ? ' asset-section__chevron--collapsed' : ''}`} width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+              <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Notes
+            {song.notes.length > 0 && <span className="asset-section__count">{song.notes.length}</span>}
+          </button>
+          {!collapsedPanels.has('Notes') && (
+            <NoteList
+              notes={song.notes}
+              draft={songNoteDraft}
+              onDraftChange={setSongNoteDraft}
+              onAdd={addSongNote}
+              onDelete={deleteSongNote}
+              placeholder="Anything worth remembering about this song…"
+              emptyLabel="No notes on this song yet."
+              busy={savingNote}
+            />
+          )}
+        </div>
+
+        <div className="card sidebar-panel">
+          <button
+            className="sidebar-panel__title sidebar-panel__toggle"
+            type="button"
             onClick={() => togglePanel('Tasks')}
             aria-expanded={!collapsedPanels.has('Tasks')}
           >
@@ -1403,32 +1470,40 @@ export function SongWorkspacePage() {
           </button>
           {!collapsedPanels.has('Tasks') && (
             <>
-              <form className="form-stack" onSubmit={createTask}>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input className="input" value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="New task" required />
-                  <button className="btn btn-ghost btn-sm" type="submit" style={{ flexShrink: 0 }}>Add</button>
-                </div>
+              <form className="task-form" onSubmit={createTask}>
+                <input
+                  className="input"
+                  value={taskTitle}
+                  onChange={e => setTaskTitle(e.target.value)}
+                  placeholder="New task"
+                  aria-label="New task"
+                  required
+                />
+                <button className="btn btn-ghost" type="submit" disabled={!taskTitle.trim()}>Add</button>
               </form>
+              {song.tasks.length === 0 && <p className="task-empty">No tasks yet.</p>}
               {song.tasks.length > 0 && (
                 <ul className="task-list">
                   {song.tasks.map(task => (
                     <li key={task.id} className={`task-item task-item--${task.status.toLowerCase().replace(' ', '-')}`}>
+                      <span className="task-item__title">{task.title}</span>
                       <div className="task-item__row">
-                        <span className="task-item__title">{task.title}</span>
                         <select
                           className="select task-item__select"
                           value={task.status}
+                          aria-label={`Status for ${task.title}`}
                           onChange={e => updateTaskStatus(task.id, e.target.value as SongTaskStatus)}
                         >
                           <option value="Open">Open</option>
                           <option value="In Review">In Review</option>
                           <option value="Done">Done</option>
                         </select>
+                        {task.assignee && <span className="task-item__assignee">{task.assignee}</span>}
                         <button
                           className="btn btn-ghost btn-icon task-item__delete"
                           type="button"
                           onClick={() => deleteTask(task.id)}
-                          aria-label="Delete task"
+                          aria-label={`Delete task: ${task.title}`}
                           title="Delete task"
                         >
                           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -1436,7 +1511,6 @@ export function SongWorkspacePage() {
                           </svg>
                         </button>
                       </div>
-                      {task.assignee && <span className="task-item__assignee">{task.assignee}</span>}
                     </li>
                   ))}
                 </ul>
